@@ -53,8 +53,8 @@ export interface HistoryItem {
     desatualizado: number;
     naoLidoComEstoque: number;
     semPresencaComEstoque: number;
-  };
-  collaboratorStats?: { [name: string]: number };
+  } | null;
+  collaboratorStats?: { [name: string]: number } | null;
   stats: {
     totalSku: number;
     totalNotRead: number;
