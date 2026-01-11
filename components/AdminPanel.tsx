@@ -1,28 +1,53 @@
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { supabase } from '../services/supabaseClient';
 import { UserProfile } from '../types';
-import { UserPlus, Trash2, Edit2, Shield, Store, User, X, Check, Loader2, AlertCircle, RefreshCw, Database, EyeOff, Lock, Eye, Terminal } from 'lucide-react';
+import { UserPlus, Trash2, Edit2, Shield, Store, User, X, Check, Loader2, AlertCircle, RefreshCw, Eye, Terminal, Lock, Settings } from 'lucide-react';
 import ModalConfirm from './ModalConfirm';
-
-const supabaseUrl = 'https://uijltxipibmuucrjejzw.supabase.co';
-const supabaseKey = 'sb_publishable_inbwxI-hC2PBz3ZCFTfeZw_gSshCX5C';
-const tempSupabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false }
-});
+import { pb } from '../services/pocketbase';
 
 interface AdminPanelProps {
   onShowToast: (message: string) => void;
+  onProfileUpdate?: (profile: UserProfile) => void;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
-  const [users, setUsers] = useState<UserProfile[]>([]);
+const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate }) => {
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    // Carregar perfil do usuário logado para verificar role adicionalmente
+    const fetchCurrentProfile = async () => {
+      if (pb.authStore.model) {
+        try {
+          const profileData = await pb.collection('profiles').getFirstListItem(`user="${pb.authStore.model.id}"`);
+          setProfile({
+            id: pb.authStore.model.id,
+            username: profileData.username,
+            role: profileData.role,
+            loja: profileData.loja
+          });
+        } catch (e: any) {
+          if (!e.isAbort && e.status !== 0) {
+            console.error("Erro ao validar perfil admin:", e);
+          }
+        }
+      }
+    };
+    fetchCurrentProfile();
+  }, []);
+
+  // Bloqueio de segurança: Se não for admin, não renderiza nada
+  if (profile && profile.role !== 'admin' && pb.authStore.model?.username !== 'admin') {
+    return <div className="p-8 text-center bg-white rounded-3xl shadow-sm">
+      <h2 className="text-xl font-black text-red-600 uppercase">Acesso Negado</h2>
+      <p className="text-slate-500 mt-2">Você não tem permissão para acessar esta área.</p>
+    </div>;
+  }
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
-  
+
   // Custom Confirmation States
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -36,8 +61,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
     role: 'user' as 'admin' | 'user' | 'viewer',
     loja: ''
   });
+
+  // Novos estados para filtro de lojas do admin
+  const [adminLojas, setAdminLojas] = useState<string[]>([]);
+  const [allAvailableLojas, setAllAvailableLojas] = useState<string[]>([]);
+  const [isSavingLojas, setIsSavingLojas] = useState(false);
+
+  useEffect(() => {
+    const loadAdminLojas = async () => {
+      // 1. Carregar lojas já selecionadas do perfil
+      if (profile?.visibleLojas) {
+        setAdminLojas(profile.visibleLojas);
+      } else if (profile?.loja) {
+        // Fallback para o campo loja se não houver visibleLojas (pode vir como CSV)
+        const lojas = profile.loja.split(',').map(l => l.trim()).filter(l => l !== '');
+        setAdminLojas(lojas);
+      }
+
+      // 2. Buscar todas as lojas que existem no histórico para dar como opção
+      try {
+        const historyRecords = await pb.collection('audit_history').getFullList({ fields: 'loja' });
+        const uniqueLojas = Array.from(new Set(historyRecords.map(r => r.loja))).sort();
+        setAllAvailableLojas(uniqueLojas);
+      } catch (e) {
+        console.error("Erro ao carregar lojas disponíveis:", e);
+      }
+    };
+
+    if (profile) loadAdminLojas();
+  }, [profile]);
+
+  const toggleAdminLoja = (loja: string) => {
+    setAdminLojas(prev =>
+      prev.includes(loja) ? prev.filter(l => l !== loja) : [...prev, loja]
+    );
+  };
+
+  const selectAllLojas = () => {
+    setAdminLojas(allAvailableLojas);
+  };
+
+  const clearAllLojas = () => {
+    setAdminLojas([]);
+  };
+
+  const saveAdminLojas = async () => {
+    if (!profile) return;
+    setIsSavingLojas(true);
+    try {
+      const lojasCsv = adminLojas.join(',');
+      const profileRecord = await pb.collection('profiles').getFirstListItem(`user="${profile.id}"`);
+      await pb.collection('profiles').update(profileRecord.id, {
+        loja: lojasCsv
+      });
+
+      // Notificar o componente App sobre a mudança para atualizar o dashboard na hora
+      if (onProfileUpdate) {
+        onProfileUpdate({
+          ...profile,
+          loja: lojasCsv,
+          visibleLojas: adminLojas
+        });
+      }
+
+      onShowToast("Preferências de lojas salvas!");
+    } catch (e) {
+      console.error("Erro ao salvar lojas do admin:", e);
+      onShowToast("Erro ao salvar preferências.");
+    } finally {
+      setIsSavingLojas(false);
+    }
+  };
   const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError] = useState<{message: string, type: 'error' | 'warning' | 'info', sql?: string} | null>(null);
+  const [formError, setFormError] = useState<{ message: string, type: 'error' | 'warning' | 'info', sql?: string } | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -47,19 +143,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: fetchError } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('username', { ascending: true });
+      // No PocketBase, buscamos os perfis
+      const records = await pb.collection('profiles').getFullList({
+        sort: 'username',
+      });
 
-      if (fetchError) {
-        setError(`Erro ao carregar usuários: ${fetchError.message}`);
-        setUsers([]);
-      } else {
-        setUsers(data || []);
-      }
+      const mappedUsers: UserProfile[] = records.map(r => ({
+        id: r.user, // Campo 'user' é o ID da relação
+        username: r.username,
+        role: r.role,
+        loja: r.loja
+      }));
+
+      setUsers(mappedUsers);
     } catch (err: any) {
-      setError('Falha crítica ao conectar com o banco de dados.');
+      if (!err.isAbort && err.status !== 0) {
+        console.error('Fetch users error:', err);
+        setError('Erro ao carregar usuários do PocketBase.');
+      }
     } finally {
       setLoading(false);
     }
@@ -70,7 +171,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
       setEditingUser(user);
       setFormData({
         username: user.username,
-        password: '', 
+        password: '',
         role: user.role,
         loja: user.loja
       });
@@ -87,31 +188,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
     setIsModalOpen(true);
   };
 
-  const extractErrorMessage = (err: any): {message: string, sql?: string} => {
-    const rawMessage = err?.message || err?.error_description || (typeof err === 'string' ? err : 'Erro desconhecido');
-    
-    if (rawMessage.includes('profiles_role_check')) {
-      return {
-        message: 'ERRO DE BANCO: O nível "VIEWER" ainda não foi habilitado no seu Supabase.',
-        sql: "ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check;\nALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('admin', 'user', 'viewer'));"
-      };
-    }
-
-    if (rawMessage.includes('violates foreign key constraint') || rawMessage.includes('audit_history_user_id_fkey')) {
-      return {
-        message: 'ERRO: Histórico de auditoria bloqueando exclusão. É necessário atualizar a regra do banco.',
-        sql: "-- Execute isto no SQL Editor:\nALTER TABLE audit_history DROP CONSTRAINT IF EXISTS audit_history_user_id_fkey;\nALTER TABLE audit_history ADD CONSTRAINT audit_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL;"
-      };
-    }
-
-    if (rawMessage.includes('admin_delete_user') || rawMessage.includes('function not found')) {
-      return {
-        message: 'ERRO: Função de exclusão total não configurada no Supabase.',
-        sql: "CREATE OR REPLACE FUNCTION admin_delete_user(target_user_id UUID)\nRETURNS void\nLANGUAGE plpgsql\nSECURITY DEFINER\nAS $$\nBEGIN\n  DELETE FROM public.profiles WHERE id = target_user_id;\n  DELETE FROM auth.users WHERE id = target_user_id;\nEND;\n$$;"
-      };
-    }
-
-    return { message: rawMessage };
+  const extractErrorMessage = (err: any): { message: string, sql?: string } => {
+    return { message: err?.message || 'Erro inesperado no PocketBase' };
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -122,55 +200,70 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
     try {
       const cleanUsername = formData.username.trim().toLowerCase();
       const cleanLoja = formData.loja.trim() || '204';
-      
-      if (editingUser) {
-        const { error: upError } = await supabase
-          .from('profiles')
-          .update({ role: formData.role, loja: cleanLoja })
-          .eq('id', editingUser.id);
-        
-        if (upError) throw upError;
+      const internalEmail = cleanUsername.includes('@') ? cleanUsername : `${cleanUsername}@sistema.local`;
 
+      if (editingUser) {
+        // 1. Buscar o registro do perfil correspondente
+        const profile = await pb.collection('profiles').getFirstListItem(`user="${editingUser.id}"`);
+
+        // 2. Atualizar perfil
+        await pb.collection('profiles').update(profile.id, {
+          role: formData.role,
+          loja: cleanLoja
+        });
+
+        // 3. Atualizar senha no Auth do PocketBase se fornecida
         if (formData.password.trim() !== '') {
-          const { error: rpcError } = await supabase.rpc('admin_update_user_password', {
-            target_user_id: editingUser.id,
-            new_password: formData.password
-          });
-          if (rpcError) throw rpcError;
+          // No PocketBase, a alteração de senha de outro usuário requer privilégios de admin
+          // Por enquanto, informamos que a senha não pode ser alterada via painel
+          console.warn('Alteração de senha via painel não implementada. Use o painel do PocketBase.');
+          onShowToast('Senha não alterada. Use o painel do PocketBase para resetar senhas.');
         }
         onShowToast("Usuário atualizado!");
       } else {
-        const internalEmail = `${cleanUsername}@sistema.local`;
-        const { data: authData, error: authError } = await tempSupabase.auth.signUp({
-          email: internalEmail,
-          password: formData.password,
-          options: {
-            data: { display_name: cleanUsername, loja: cleanLoja, role: formData.role }
-          }
-        });
+        // Criar no PocketBase
+        console.log('🚀 Iniciando criação de usuário:', cleanUsername);
 
-        if (authError) throw authError;
+        let authData;
+        try {
+          authData = await pb.collection('users').create({
+            email: internalEmail,
+            password: formData.password,
+            passwordConfirm: formData.password,
+            username: cleanUsername,
+            name: cleanUsername
+          });
+          console.log('✅ Usuário criado no Auth:', authData.id);
+        } catch (authErr: any) {
+          console.error('❌ Falha ao criar usuário no Auth:', authErr);
+          throw new Error(`Falha na criação do usuário: ${authErr.message}`);
+        }
 
-        if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert({
-              id: authData.user.id,
+        if (authData) {
+          console.log('🚀 Iniciando criação de perfil para:', authData.id);
+          try {
+            await pb.collection('profiles').create({
+              user: authData.id,
               username: cleanUsername,
               role: formData.role,
               loja: cleanLoja
             });
-          if (profileError) throw profileError;
+            console.log('✅ Perfil criado com sucesso');
+          } catch (profileErr: any) {
+            console.error('❌ Falha ao criar perfil:', profileErr);
+            // Se o usuário foi criado mas o perfil não, informamos mas não cancelamos tudo
+            onShowToast("Usuário criado (Auth), mas houve erro ao criar o Perfil. Verifique as permissões.");
+            throw new Error(`Usuário criado, mas falha no Perfil: ${profileErr.message}`);
+          }
         }
-        onShowToast("Usuário criado!");
+        onShowToast("Usuário e Perfil criados com sucesso!");
       }
 
       setIsModalOpen(false);
       fetchUsers();
     } catch (err: any) {
       console.error('Erro ao salvar:', err);
-      const errDetail = extractErrorMessage(err);
-      setFormError({ message: errDetail.message, type: 'error', sql: errDetail.sql });
+      setFormError({ message: err.message || 'Erro ao salvar no PocketBase', type: 'error' });
     } finally {
       setFormLoading(false);
     }
@@ -180,19 +273,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
     const { userId } = confirmModal;
     setFormLoading(true);
     try {
-      const { error: delError } = await supabase.rpc('admin_delete_user', {
-        target_user_id: userId
-      });
+      // 1. Deletar perfil
+      const profile = await pb.collection('profiles').getFirstListItem(`user="${userId}"`);
+      await pb.collection('profiles').delete(profile.id);
 
-      if (delError) throw delError;
-      
+      // 2. Deletar usuário no Auth
+      await pb.collection('users').delete(userId);
+
       setConfirmModal({ ...confirmModal, isOpen: false });
       onShowToast("Usuário excluído!");
       fetchUsers();
     } catch (err: any) {
       console.error('Delete error:', err);
-      const errDetail = extractErrorMessage(err);
-      setFormError({ message: errDetail.message, type: 'error', sql: errDetail.sql });
+      setFormError({ message: err.message || 'Erro ao excluir usuário', type: 'error' });
       setIsModalOpen(true);
       setConfirmModal({ ...confirmModal, isOpen: false });
     } finally {
@@ -208,12 +301,67 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
           <p className="text-slate-500 font-bold text-sm uppercase tracking-widest mt-1">Gestão de Acessos e Permissões</p>
         </div>
         <div className="flex gap-2">
-           <button onClick={fetchUsers} title="Recarregar" className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm active:scale-90">
-             <RefreshCw className={`w-6 h-6 ${loading ? 'animate-spin' : ''}`} />
-           </button>
-           <button onClick={() => handleOpenModal()} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-black transition-all shadow-xl shadow-blue-100 active:scale-95 uppercase text-xs tracking-widest">
+          <button onClick={fetchUsers} title="Recarregar" className="p-4 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-blue-600 transition-colors shadow-sm active:scale-90">
+            <RefreshCw className={`w-6 h-6 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button onClick={() => handleOpenModal()} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-black transition-all shadow-xl shadow-blue-100 active:scale-95 uppercase text-xs tracking-widest">
             <UserPlus className="w-6 h-6" /> CRIAR USUÁRIO
           </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
+          <div>
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">Lojas Visíveis para você</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Selecione quais lojas deseja visualizar no painel</p>
+          </div>
+          <button
+            onClick={saveAdminLojas}
+            disabled={isSavingLojas}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-black transition-all shadow-lg active:scale-95 uppercase text-[10px] tracking-widest disabled:opacity-50"
+          >
+            {isSavingLojas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
+            SALVAR PREFERÊNCIAS
+          </button>
+        </div>
+
+        <div className="p-6">
+          <div className="flex flex-wrap gap-2 mb-6">
+            {allAvailableLojas.length === 0 ? (
+              <p className="text-slate-400 text-[10px] font-black uppercase italic">Nenhuma loja detectada no histórico ainda...</p>
+            ) : (
+              allAvailableLojas.map(lojaId => (
+                <button
+                  key={lojaId}
+                  onClick={() => toggleAdminLoja(lojaId)}
+                  className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all border-2 flex items-center gap-2 ${adminLojas.includes(lojaId)
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-200'
+                    : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'
+                    }`}
+                >
+                  <Store className={`w-4 h-4 ${adminLojas.includes(lojaId) ? 'text-blue-100' : 'text-slate-200'}`} />
+                  Loja {lojaId}
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 pt-6 border-t border-slate-50">
+            <button
+              onClick={selectAllLojas}
+              className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:text-blue-700 transition-colors flex items-center gap-2"
+            >
+              <Check className="w-3 h-3" /> Selecionar Tudo
+            </button>
+            <div className="w-1 h-1 bg-slate-200 rounded-full" />
+            <button
+              onClick={clearAllLojas}
+              className="text-[10px] font-black text-red-500 uppercase tracking-widest hover:text-red-600 transition-colors flex items-center gap-2"
+            >
+              <X className="w-3 h-3" /> Limpar Seleção
+            </button>
+          </div>
         </div>
       </div>
 
@@ -246,10 +394,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
                       </div>
                     </td>
                     <td className="px-8 py-6 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                        user.role === 'admin' ? 'bg-indigo-600 text-white' : 
+                      <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${user.role === 'admin' ? 'bg-indigo-600 text-white' :
                         (user.role === 'viewer' ? 'bg-slate-100 text-slate-400 border border-slate-200' : 'bg-emerald-50 text-emerald-700')
-                      }`}>
+                        }`}>
                         {user.role === 'admin' ? <Shield className="w-3 h-3" /> : (user.role === 'viewer' ? <Eye className="w-3 h-3" /> : <Shield className="w-3 h-3" />)}
                         {user.role === 'admin' ? 'ADMIN' : (user.role === 'viewer' ? 'VIEWER' : 'USER')}
                       </span>
@@ -260,12 +407,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
                       </div>
                     </td>
                     <td className="px-8 py-6 whitespace-nowrap text-right">
-                      <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex justify-end gap-3 transition-opacity">
                         <button onClick={() => handleOpenModal(user)} title="Editar" className="p-3 text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors border border-blue-100">
                           <Edit2 className="w-5 h-5" />
                         </button>
-                        <button 
-                          onClick={() => setConfirmModal({ isOpen: true, userId: user.id, username: user.username })} 
+                        <button
+                          onClick={() => setConfirmModal({ isOpen: true, userId: user.id, username: user.username })}
                           disabled={user.username === 'admin'}
                           className="p-3 text-red-600 hover:bg-red-50 rounded-2xl transition-colors border border-red-100 disabled:opacity-30"
                         >
@@ -323,20 +470,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
               <div className="space-y-5 text-left">
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Usuário</label>
-                  <input type="text" required disabled={!!editingUser || formLoading} value={formData.username} onChange={e => setFormData({...formData, username: e.target.value.replace(/\s+/g, '').toLowerCase()})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none" />
+                  <input type="text" required disabled={!!editingUser || formLoading} value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value.replace(/\s+/g, '').toLowerCase() })} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">{editingUser ? 'Nova Senha (opcional)' : 'Senha'}</label>
-                  <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" /><input type="password" required={!editingUser} minLength={6} disabled={formLoading} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full pl-12 pr-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 transition-all outline-none" /></div>
+                  <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" /><input type="password" required={!editingUser} minLength={6} disabled={formLoading} value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full pl-12 pr-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 transition-all outline-none" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Função</label>
-                    <select disabled={formLoading} value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as any})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 outline-none appearance-none"><option value="user">USER</option><option value="viewer">VIEWER</option><option value="admin">ADMIN</option></select>
+                    <select disabled={formLoading} value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as any })} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 outline-none appearance-none"><option value="user">USER</option><option value="viewer">VIEWER</option><option value="admin">ADMIN</option></select>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Loja</label>
-                    <input type="text" required disabled={formLoading} value={formData.loja} onChange={e => setFormData({...formData, loja: e.target.value.toUpperCase()})} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 outline-none" />
+                    <input type="text" required disabled={formLoading} value={formData.loja} onChange={e => setFormData({ ...formData, loja: e.target.value.toUpperCase() })} className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 outline-none" />
                   </div>
                 </div>
               </div>
@@ -350,7 +497,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast }) => {
         </div>
       )}
 
-      <ModalConfirm 
+      <ModalConfirm
         isOpen={confirmModal.isOpen}
         onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
         onConfirm={confirmDeleteUser}

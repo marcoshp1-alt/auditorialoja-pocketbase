@@ -14,11 +14,11 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
     return Object.entries(stats || {})
       .map(([name, count]) => ({ name, count: count as number }))
       // Filtro extra de segurança: Remove S/N do ranking caso passe pelo serviço
-      .filter(item => 
-        item.name && 
-        item.name !== 'S/N' && 
-        item.name !== 'SN' && 
-        item.name !== 'S / N' && 
+      .filter(item =>
+        item.name &&
+        item.name !== 'S/N' &&
+        item.name !== 'SN' &&
+        item.name !== 'S / N' &&
         item.name !== 'NULL' &&
         item.name !== 'DESCONHECIDO'
       )
@@ -38,28 +38,28 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
   return (
     <div className="bg-white rounded-[32px] border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Header do Ranking */}
-      <div className="p-6 md:p-8 bg-indigo-50 border-b border-indigo-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="p-4 md:p-5 bg-indigo-50 border-b border-indigo-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-indigo-900 tracking-tight uppercase leading-none mb-2">
             RANKING DE LEITURAS
           </h2>
           <div className="flex items-center gap-3">
-             <span className="bg-indigo-600 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                {ranking.length} Colaboradores Ativos
-             </span>
+            <span className="bg-indigo-600 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
+              {ranking.length} Colaboradores Ativos
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="relative group flex-1 md:flex-initial">
-             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400 group-focus-within:text-indigo-600 transition-colors" />
-             <input 
-               type="text" 
-               placeholder="Buscar colaborador..."
-               value={searchTerm}
-               onChange={(e) => setSearchTerm(e.target.value)}
-               className="w-full md:w-80 pl-12 pr-4 py-3.5 bg-white border-2 border-indigo-100 rounded-2xl font-bold text-slate-700 focus:border-indigo-500 outline-none transition-all placeholder:text-indigo-300 placeholder:font-black placeholder:uppercase placeholder:text-[10px]"
-             />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-400 group-focus-within:text-indigo-600 transition-colors" />
+            <input
+              type="text"
+              placeholder="Buscar colaborador..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full md:w-80 pl-12 pr-4 py-3.5 bg-white border-2 border-indigo-100 rounded-2xl font-bold text-slate-700 focus:border-indigo-500 outline-none transition-all placeholder:text-indigo-300 placeholder:font-black placeholder:uppercase placeholder:text-[10px]"
+            />
           </div>
           <button onClick={onClose} className="p-3 hover:bg-indigo-200 rounded-full text-indigo-500 transition-all">
             <X className="w-7 h-7" />
@@ -70,7 +70,7 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
       {/* Lista de Colaboradores */}
       <div className="p-4 md:p-8">
         <div className="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
-          <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-4 bg-slate-100 border-b border-slate-200">
+          <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-2.5 bg-slate-100 border-b border-slate-200">
             <div className="col-span-1 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pos</div>
             <div className="col-span-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Colaborador</div>
             <div className="col-span-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Performance Visual</div>
@@ -86,9 +86,9 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
               filteredRanking.map((item, idx) => {
                 const progress = maxReadings > 0 ? (item.count / maxReadings) * 100 : 0;
                 const isTop1 = idx === 0 && !searchTerm;
-                
+
                 return (
-                  <div key={item.name} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center px-6 py-4 bg-white hover:bg-indigo-50/30 transition-colors group">
+                  <div key={item.name} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center px-6 py-2 bg-white hover:bg-indigo-50/30 transition-colors group">
                     {/* Posição */}
                     <div className="col-span-1 flex items-center">
                       {isTop1 ? (
@@ -119,7 +119,7 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
                     {/* Barra de Progresso (Performance) */}
                     <div className="col-span-4 hidden md:block">
                       <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
-                        <div 
+                        <div
                           className={`h-full transition-all duration-1000 ease-out ${isTop1 ? 'bg-amber-500' : 'bg-indigo-500'}`}
                           style={{ width: `${progress}%` }}
                         />
@@ -145,7 +145,7 @@ const CollaboratorRanking: React.FC<CollaboratorRankingProps> = ({ stats, onClos
       </div>
 
       <div className="p-6 bg-slate-50 border-t border-slate-200 text-right">
-         <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Exibindo Estatísticas de Performance da Equipe</p>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Exibindo Estatísticas de Performance da Equipe</p>
       </div>
     </div>
   );

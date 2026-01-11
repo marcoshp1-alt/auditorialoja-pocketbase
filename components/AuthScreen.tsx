@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { supabase } from '../services/supabaseClient';
+import { pb } from '../services/pocketbase';
 import { Lock, User, Loader2, LogIn, AlertCircle } from 'lucide-react';
 
 interface AuthScreenProps {
@@ -20,54 +20,33 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
     try {
       const cleanUsername = usernameInput.trim().toLowerCase();
-      
+
       if (!cleanUsername || !password) {
         throw new Error('Por favor, informe o usuário e a senha.');
       }
 
-      // 1. Verificar se o usuário existe na tabela de perfis (opcional para exibição, não para bloqueio)
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('username', cleanUsername)
-        .maybeSingle();
-
-      // Determinar o identificador de login
-      // Se tiver @, é um e-mail direto. Se não, é o formato sintético do sistema.
+      // No PocketBase, tentamos logar diretamente.
+      // Se você configurou para logar com e-mail, usamos o e-mail.
+      // Se configurou para logar com username, usamos o username.
       const isEmail = cleanUsername.includes('@');
-      const loginEmail = isEmail ? cleanUsername : `${cleanUsername}@sistema.local`;
+      const loginIdentity = isEmail ? cleanUsername : `${cleanUsername}@sistema.local`;
 
-      // 2. Tentar autenticação direta no Supabase Auth
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
-        password: password,
-      });
-      
-      if (authError) {
-        const msg = authError.message.toLowerCase();
-        
-        if (msg.includes('invalid login credentials')) {
-          // Se não encontramos o perfil E o auth falhou, o usuário provavelmente não existe
-          if (!profile && !isEmail) {
-            throw new Error('Usuário não encontrado ou senha incorreta.');
-          }
-          throw new Error('Senha incorreta para este usuário.');
-        } 
-        
-        if (msg.includes('email not confirmed')) {
-          throw new Error('Esta conta ainda não foi confirmada no sistema.');
-        }
-        
-        throw new Error(authError.message);
-      }
-
-      if (data.user) {
+      try {
+        await pb.collection('users').authWithPassword(loginIdentity, password);
         onLoginSuccess();
+      } catch (authErr: any) {
+        console.error('PocketBase Auth Error:', authErr);
+
+        // Melhoras na mensagem de erro
+        if (authErr.status === 400 || authErr.status === 404) {
+          throw new Error('Usuário não encontrado ou senha incorreta.');
+        }
+        throw new Error(authErr.message || 'Erro ao autenticar no PocketBase.');
       }
     } catch (err: any) {
       // Prevenção robusta contra [object Object]
       let finalMessage = 'Erro ao realizar login.';
-      
+
       if (typeof err === 'string') {
         finalMessage = err;
       } else if (err instanceof Error) {
@@ -156,7 +135,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             )}
           </button>
         </form>
-        
+
         <div className="mt-12 pt-8 border-t border-slate-100 text-center">
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em]">
             autoria de Marcos Silva

@@ -27,9 +27,9 @@ interface SummaryStatsProps {
   };
 }
 
-const SummaryStats: React.FC<SummaryStatsProps> = ({ 
-  data, 
-  isAnalysis = false, 
+const SummaryStats: React.FC<SummaryStatsProps> = ({
+  data,
+  isAnalysis = false,
   isClassReport = false,
   categoryStats,
   collaboratorStats,
@@ -44,9 +44,9 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
 
     const totalSku = data.reduce((acc, curr) => acc + curr.sku, 0);
     const totalNotRead = data.reduce((acc, curr) => acc + curr.notRead, 0);
-    
+
     const hasOutdatedData = data.some(row => row.outdated !== undefined);
-    const totalOutdated = hasOutdatedData 
+    const totalOutdated = hasOutdatedData
       ? data.reduce((acc, curr) => acc + (curr.outdated || 0), 0)
       : undefined;
 
@@ -93,21 +93,19 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
       </div>
 
       {/* Total de Itens Não Lidos */}
-      <div 
+      <div
         onClick={() => isClassReport && onCategoryClick?.('TOTAL_NOT_READ')}
-        className={`bg-white rounded-xl shadow-sm border-2 p-6 flex items-center justify-between group transition-all duration-300 ${
-          isClassReport ? 'cursor-pointer hover:border-red-300 hover:-translate-y-1 hover:shadow-md' : 'cursor-default border-slate-200'
-        } ${
-          selectedCategory === 'TOTAL_NOT_READ' && !isCollaboratorView ? 'border-red-500 ring-2 ring-red-100 shadow-md' : 'border-slate-200'
-        }`}
+        className={`bg-white rounded-xl shadow-sm border-2 p-6 flex items-center justify-between group transition-all duration-300 ${isClassReport ? 'cursor-pointer hover:border-red-300 hover:-translate-y-1 hover:shadow-md' : 'cursor-default border-slate-200'
+          } ${selectedCategory === 'TOTAL_NOT_READ' && !isCollaboratorView ? 'border-red-500 ring-2 ring-red-100 shadow-md' : 'border-slate-200'
+          }`}
       >
         <div>
           <p className="text-sm font-black text-slate-500 uppercase tracking-wider">
-             {isAnalysis ? 'Total Não Lidos' : 'Total de Itens Não Lidos'}
+            {isAnalysis ? 'Total Não Lidos' : 'Total de Itens Não Lidos'}
           </p>
           <h3 className="text-3xl font-black text-slate-900 mt-1">{stats.totalNotRead.toLocaleString('pt-BR')}</h3>
           {isClassReport && (
-            <p className="text-[10px] font-black text-red-500 uppercase mt-2 tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+            <p className="text-[10px] font-black text-red-500 uppercase mt-2 tracking-widest">
               Clique para ver detalhes
             </p>
           )}
@@ -145,11 +143,11 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
           <p className="text-[10px] font-black text-white/90 uppercase tracking-[0.2em] flex items-center gap-2 mb-2">
             {isAnalysis ? 'Resultado' : 'Parcial Geral'}
           </p>
-          
+
           {stats.isSyncing ? (
             <div className="flex flex-col items-center gap-2 mt-2">
-               <Loader2 className="w-8 h-8 animate-spin text-white/80" />
-               <h3 className="text-sm font-black uppercase tracking-widest text-white/70">Calculando...</h3>
+              <Loader2 className="w-8 h-8 animate-spin text-white/80" />
+              <h3 className="text-sm font-black uppercase tracking-widest text-white/70">Calculando...</h3>
             </div>
           ) : (
             <div className="flex flex-col items-center">
@@ -174,20 +172,18 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
       <div className="mb-6">
         {mainCards}
         <div className="flex items-center gap-4 mb-4">
-           <div className="h-px bg-slate-200 flex-1"></div>
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Distribuição e Equipe</p>
-           <div className="h-px bg-slate-200 flex-1"></div>
+          <div className="h-px bg-slate-200 flex-1"></div>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Distribuição e Equipe</p>
+          <div className="h-px bg-slate-200 flex-1"></div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {categories.map((cat) => (
-            <div 
+            <div
               key={cat.id}
               onClick={() => cat.interactive && onCategoryClick?.(cat.id)}
-              className={`bg-white rounded-xl shadow-sm border-2 p-5 flex items-center justify-between group transition-all duration-300 ${
-                cat.interactive ? 'cursor-pointer hover:border-blue-300 hover:-translate-y-1' : 'cursor-default'
-              } ${
-                selectedCategory === cat.id && !isCollaboratorView ? 'border-blue-500 ring-2 ring-blue-100 -translate-y-1' : 'border-slate-100'
-              }`}
+              className={`bg-white rounded-xl shadow-sm border-2 p-5 flex items-center justify-between group transition-all duration-300 ${cat.interactive ? 'cursor-pointer hover:border-blue-300 hover:-translate-y-1' : 'cursor-default'
+                } ${selectedCategory === cat.id && !isCollaboratorView ? 'border-blue-500 ring-2 ring-blue-100 -translate-y-1' : 'border-slate-100'
+                }`}
             >
               <div className="min-w-0">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate mb-1">
@@ -204,11 +200,10 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
           ))}
 
           {/* Card de Colaboradores */}
-          <div 
+          <div
             onClick={onCollaboratorClick}
-            className={`bg-white rounded-xl shadow-sm border-2 p-5 flex items-center justify-between group cursor-pointer transition-all duration-300 hover:border-indigo-300 hover:-translate-y-1 ${
-              isCollaboratorView ? 'border-indigo-500 ring-2 ring-indigo-100 -translate-y-1' : 'border-slate-100'
-            }`}
+            className={`bg-white rounded-xl shadow-sm border-2 p-5 flex items-center justify-between group cursor-pointer transition-all duration-300 hover:border-indigo-300 hover:-translate-y-1 ${isCollaboratorView ? 'border-indigo-500 ring-2 ring-indigo-100 -translate-y-1' : 'border-slate-100'
+              }`}
           >
             <div className="min-w-0">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate mb-1">
@@ -217,6 +212,9 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({
               <h3 className="text-3xl font-black text-slate-800 leading-none">
                 {collaboratorCount}
               </h3>
+              <p className="text-[10px] font-black text-indigo-500 uppercase mt-2 tracking-widest">
+                Clique para ver ranking
+              </p>
             </div>
             <div className={`bg-indigo-50 p-3 rounded-2xl group-hover:scale-110 transition-transform duration-300`}>
               <Users className={`w-8 h-8 text-indigo-600`} />

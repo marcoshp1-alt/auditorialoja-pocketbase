@@ -9,14 +9,14 @@ import { AuditRow, RawExcelRow, ProductClassResult, ClassDetailRow, HistoryItem,
  */
 const sanitizeName = (name: string): string => {
   if (!name) return "Desconhecido";
-  
+
   // 1. Remove prefixo de loja (ex: "204 - " ou "Loja 204 -")
   let cleaned = name.replace(/^(Loja\s+)?\d+\s*-\s*/i, "").trim();
-  
+
   // 2. Divide por hífens (comuns, en-dash, em-dash) ou barras
   // Pega estritamente a primeira parte que contenha conteúdo
   const parts = cleaned.split(/[-\u2013\u2014\/]/).map(p => p.trim()).filter(p => p !== "");
-  
+
   return parts.length > 0 ? parts[0] : cleaned;
 };
 
@@ -35,7 +35,7 @@ export const parseExcelFile = (file: File): Promise<AuditRow[]> => {
         const workbook = XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         const jsonData = XLSX.utils.sheet_to_json<RawExcelRow>(worksheet);
         const processedData: AuditRow[] = [];
 
@@ -52,9 +52,9 @@ export const parseExcelFile = (file: File): Promise<AuditRow[]> => {
 
           const rawCorridor = normalizedRow["Auditado em"] ? String(normalizedRow["Auditado em"]) : "Desconhecido";
           const corridor = sanitizeName(rawCorridor);
-          
+
           const sku = Number(normalizedRow["Itens com Estoque"] || 0);
-          
+
           let rawNotRead = normalizedRow["Não Lidas com Estoque"];
           if (rawNotRead === undefined) {
             rawNotRead = normalizedRow["Ruptura 1ª"];
@@ -105,7 +105,7 @@ export const parseAnalysisFile = (file: File): Promise<AuditRow[]> => {
         const workbook = XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         const jsonData = XLSX.utils.sheet_to_json<RawExcelRow>(worksheet);
         const processedData: AuditRow[] = [];
 
@@ -125,7 +125,7 @@ export const parseAnalysisFile = (file: File): Promise<AuditRow[]> => {
 
           const corridor = sanitizeName(rawDescription);
           const sku = Number(normalizedRow["Qtde Total"] || normalizedRow["QTDE TOTAL"] || 0);
-          
+
           if (sku === 0) return;
 
           let rawNotRead = normalizedRow["Não lidos"] || normalizedRow["Não Lidos"] || normalizedRow["não lidos"] || 0;
@@ -134,7 +134,7 @@ export const parseAnalysisFile = (file: File): Promise<AuditRow[]> => {
           }
           const notRead = Number(rawNotRead) || 0;
 
-          const outdated = hasOutdatedColumn 
+          const outdated = hasOutdatedColumn
             ? Number(normalizedRow["Desatualizado"] || normalizedRow["Desatualizados"] || normalizedRow["desatualizados"] || 0)
             : undefined;
 
@@ -181,13 +181,13 @@ export const parseProductClassFile = (file: File): Promise<ProductClassResult> =
         const workbook = XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         const jsonData = XLSX.utils.sheet_to_json<RawExcelRow>(worksheet);
-        
+
         const classCounts: { [key: string]: number } = {};
         const collaboratorStats: { [key: string]: number } = {};
         const details: ClassDetailRow[] = [];
-        
+
         const categoryStats = {
           semEstoque: 0,
           desatualizado: 0,
@@ -207,7 +207,7 @@ export const parseProductClassFile = (file: File): Promise<ProductClassResult> =
           if (!status) return;
 
           const statusLower = status.toLowerCase();
-          
+
           const rawStock = normalizedRow["Estoque atual"];
           let stock = 0;
           if (typeof rawStock === 'number') {
@@ -221,7 +221,7 @@ export const parseProductClassFile = (file: File): Promise<ProductClassResult> =
 
           const isOutOfStock = statusLower.includes('sem estoque');
           const isOutdated = statusLower.includes('desatualizado');
-          
+
           const isNoRead = (statusLower.includes('não lido') || statusLower.includes('não lidos')) && statusLower.includes('estoque');
           const isNoPresence = statusLower.includes('sem presença') && statusLower.includes('estoque');
 
@@ -246,30 +246,34 @@ export const parseProductClassFile = (file: File): Promise<ProductClassResult> =
             const userMatch = rawUserStr.match(/\(([^)]+)\)/);
             const extracted = userMatch ? userMatch[1].trim() : rawUserStr;
             const upperExtracted = extracted.toUpperCase();
-            
+
             if (upperExtracted && upperExtracted !== "S/N" && upperExtracted !== "SN") {
               collaboratorName = upperExtracted;
               collaboratorStats[collaboratorName] = (collaboratorStats[collaboratorName] || 0) + 1;
             }
           }
 
-          details.push({
-            codigo: normalizedRow["Código"] || "",
-            produto: String(normalizedRow["Produto"] || ""),
-            estoque: stock,
-            classeRaiz: sanitizeName(rootClass ? String(rootClass) : "OUTROS"),
-            colaborador: collaboratorName || "S/N",
-            local: String(normalizedRow["Local"] || "S/N"),
-            presencaConfirmada: String(normalizedRow["Presença confirmada"] || "---"),
-            situacao: status
-          });
+          const isRelevant = isOutOfStock || isOutdated || isNoRead || isNoPresence;
+
+          if (isRelevant) {
+            details.push({
+              codigo: normalizedRow["Código"] || "",
+              produto: String(normalizedRow["Produto"] || ""),
+              estoque: stock,
+              classeRaiz: sanitizeName(rootClass ? String(rootClass) : "OUTROS"),
+              colaborador: collaboratorName || "S/N",
+              local: String(normalizedRow["Local"] || "S/N"),
+              presencaConfirmada: String(normalizedRow["Presença confirmada"] || "---"),
+              situacao: status
+            });
+          }
         });
 
         const summary: AuditRow[] = Object.entries(classCounts)
           .map(([className, count], index) => ({
             id: `row-class-${index}-${Date.now()}`,
             corridor: className,
-            sku: count, 
+            sku: count,
             notRead: count,
             partialPercentage: 100
           }))
@@ -314,16 +318,16 @@ export const exportWeeklySummaryToExcel = (summaryData: any[]) => {
         }
 
         row["Resultado%"] = `${(Math.floor(item.stats.generalPartial * 100) / 100).toFixed(2)}%`;
-        
+
         return row;
       });
 
     if (dayRows.length > 0) {
       const worksheet = XLSX.utils.json_to_sheet(dayRows);
       const wscols = [
-        { wch: 10 }, 
-        { wch: 12 }, 
-        { wch: 12 }, 
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 12 },
       ];
       if (day.hasOutdated) {
         wscols.push({ wch: 15 });

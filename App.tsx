@@ -15,9 +15,9 @@ import PasswordChangeModal from './components/PasswordChangeModal';
 import Toast from './components/Toast';
 import { AuditRow, ClassDetailRow, HistoryItem, UserProfile } from './types';
 import { parseExcelFile, parseAnalysisFile, parseProductClassFile } from './services/excelService';
-import { fetchHistory, addHistoryItem, deleteHistoryItemById, deleteAllHistory, fetchHistoryItemDetails } from './services/historyService';
-import { supabase } from './services/supabaseClient';
-import { LayoutDashboard, RefreshCcw, Download, Copy, Package, EyeOff, Activity, BarChart2, FileSpreadsheet, Menu, CloudOff, Cloud, ShieldAlert, Loader2, Calendar, LayoutGrid, FileSearch, Hash, Check, Database, Terminal, Copy as CopyIcon, X } from 'lucide-react';
+import { fetchHistory, addHistoryItem, deleteHistoryItemById, deleteAllHistory, fetchHistoryItemDetails, updateHistoryItemDate } from './services/historyService';
+import { pb } from './services/pocketbase';
+import { LayoutDashboard, RefreshCcw, Download, Copy, Package, EyeOff, Activity, BarChart2, FileSpreadsheet, Menu, CloudOff, Cloud, ShieldAlert, Loader2, Calendar, LayoutGrid, FileSearch, Hash, Check, Database, Terminal, Copy as CopyIcon, X, Share2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 type ReportType = 'audit' | 'analysis' | 'class';
@@ -34,7 +34,7 @@ const App: React.FC = () => {
   const [classDetails, setClassDetails] = useState<ClassDetailRow[]>([]);
   const [classCategoryStats, setClassCategoryStats] = useState<any>(null);
   const [classCollaboratorStats, setClassCollaboratorStats] = useState<{ [name: string]: number } | null>(null);
-  
+
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isCollaboratorView, setIsCollaboratorView] = useState(false);
 
@@ -44,7 +44,7 @@ const App: React.FC = () => {
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [activeReportId, setActiveReportId] = useState<string>('');
   const [activeLoja, setActiveLoja] = useState<string>('');
-  
+
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') return window.innerWidth >= 1024;
@@ -64,7 +64,10 @@ const App: React.FC = () => {
   const [dbErrorModal, setDbErrorModal] = useState<{ isOpen: boolean; message: string; sql: string }>({ isOpen: false, message: '', sql: '' });
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
-  
+  const [datePickerModal, setDatePickerModal] = useState<{ isOpen: boolean; reportId: string; currentDate: string }>({ isOpen: false, reportId: '', currentDate: '' });
+  const [newDateValue, setNewDateValue] = useState('');
+  const [showCopySuccess, setShowCopySuccess] = useState(false);
+
   // Sku Modal State
   const [skuModal, setSkuModal] = useState<{ isOpen: boolean; pendingFile?: File; pendingResult?: any; pendingDate?: string | null }>({ isOpen: false });
   const [manualSku, setManualSku] = useState<string>('');
@@ -76,27 +79,46 @@ const App: React.FC = () => {
   // 2. HELPER FUNCTIONS
   const fetchProfile = useCallback(async (user: any) => {
     try {
-      const jwtMetadata = user.user_metadata || {};
-      const usernameFromEmail = user.email?.split('@')[0] || 'usuário';
-      const isSystemAdmin = jwtMetadata.role === 'admin' || usernameFromEmail.toLowerCase() === 'admin';
+      // No PocketBase, o perfil já vem no authStore ou buscamos na coleção 'profiles'
+      const userId = user.id;
 
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+      let profileData: any = null;
+      try {
+        profileData = await pb.collection('profiles').getFirstListItem(`user="${userId}"`);
+      } catch (e: any) {
+        // Silenciar erro de autocancelamento ou apenas informar que o perfil será criado
+        if (!e.isAbort && e.status !== 0) {
+          console.warn("Perfil não encontrado na coleção 'profiles', usando dados básicos.");
+        }
+      }
+
 
       const mergedProfile: UserProfile = {
-        id: user.id,
-        username: profileData?.username || jwtMetadata.display_name || usernameFromEmail,
-        role: isSystemAdmin ? 'admin' : (profileData?.role || jwtMetadata.role || 'user'),
-        loja: profileData?.loja || jwtMetadata.loja || '204'
+        id: userId,
+        username: profileData?.username || user.username || user.email || 'usuário',
+        role: profileData?.role || user.role || 'user',
+        loja: profileData?.loja || user.loja || '204'
       };
+
+      // ⚠️ WORKAROUND: Forçar admin estritamente para o usuário principal "admin"
+      if (user.username === 'admin') {
+        mergedProfile.role = 'admin';
+        console.log('🔧 FORÇADO: Usuário admin detectado, role definido como admin');
+      }
+
+      // Se for admin, o campo 'loja' pode conter múltiplas lojas separadas por vírgula
+      if (mergedProfile.role === 'admin' && mergedProfile.loja) {
+        mergedProfile.visibleLojas = mergedProfile.loja.split(',').map(l => l.trim()).filter(l => l !== '');
+      }
+
+      console.log('👤 Perfil final aplicado:', mergedProfile);
 
       setProfile(mergedProfile);
       setActiveLoja(prev => prev || mergedProfile.loja);
-    } catch (err) {
-      console.error("Erro no carregamento do perfil:", err);
+    } catch (err: any) {
+      if (!err.isAbort && err.status !== 0) {
+        console.error("Erro no carregamento do perfil:", err);
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -108,8 +130,10 @@ const App: React.FC = () => {
     try {
       const remoteHistory = await fetchHistory(profile);
       setHistory(remoteHistory || []);
-    } catch (e) {
-      console.error("Histórico não pôde ser carregado:", e);
+    } catch (e: any) {
+      if (!e.isAbort && e.status !== 0) {
+        console.error("Histórico não pôde ser carregado:", e);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -149,30 +173,32 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    pb.authStore.clear();
+    setSession(null);
+    setProfile(null);
   }, []);
 
   const addToHistory = async (newData: AuditRow[], type: ReportType, file: File, date: string | null, details?: ClassDetailRow[], categoryStats?: any, collaboratorStats?: any, overrideSku?: number) => {
     if (!session || !profile) return;
-    
+
     let totalSku = overrideSku || newData.reduce((acc, curr) => acc + curr.sku, 0);
     const totalNotRead = newData.reduce((acc, curr) => acc + curr.notRead, 0);
-    
+
     const hasOutdatedData = newData.some(row => row.outdated !== undefined);
-    const totalOutdated = hasOutdatedData 
+    const totalOutdated = hasOutdatedData
       ? newData.reduce((acc, curr) => acc + (curr.outdated || 0), 0)
       : undefined;
 
     const generalPartial = totalSku > 0 ? (totalNotRead / totalSku) * 100 : 0;
-    
+
     setActiveLoja(profile.loja);
 
     const newItem: HistoryItem = {
-      id: '', 
-      timestamp: Date.now(), 
-      fileName: file.name, 
-      reportType: type, 
-      data: newData, 
+      id: '',
+      timestamp: Date.now(),
+      fileName: file.name,
+      reportType: type,
+      data: newData,
       classDetails: details || [],
       categoryStats: categoryStats || null,
       collaboratorStats: collaboratorStats || null,
@@ -186,17 +212,20 @@ const App: React.FC = () => {
       await addHistoryItem(newItem);
       const updatedHistory = await fetchHistory(profile);
       setHistory(updatedHistory || []);
-      
-      const savedItem = updatedHistory[0]; 
+
+      const savedItem = updatedHistory[0];
       if (savedItem) {
         setActiveReportId(savedItem.id);
       }
     } catch (e: any) {
-      console.error("Erro ao salvar no Supabase:", e);
-      if (e.code === 'MISSING_COLUMNS' && e.sql) {
-        setDbErrorModal({ isOpen: true, message: e.message, sql: e.sql });
+      console.error("Erro ao salvar no PocketBase:", e);
+      if (e.data && e.data.data) {
+        console.error("Detalhes da validação (Campos):", JSON.stringify(e.data.data, null, 2));
+        const firstErrorField = Object.keys(e.data.data)[0];
+        const errorMessage = e.data.data[firstErrorField].message || "Valor inválido";
+        showToast(`Erro no campo '${firstErrorField}': ${errorMessage}`);
       } else {
-        showToast("Erro ao salvar no banco de dados.");
+        showToast("Erro ao salvar no banco de dados. Verifique a conexão.");
       }
     } finally {
       setIsSyncing(false);
@@ -247,24 +276,24 @@ const App: React.FC = () => {
     setLoading(true);
     setReportType('class');
     setCustomDate(date);
-    
+
     try {
       const result = await parseProductClassFile(file);
       const targetDate = date || new Date().toLocaleDateString('en-CA');
-      
+
       const sameDayAudit = history.find(h => {
         const hDate = h.customDate || new Date(h.timestamp).toLocaleDateString('en-CA');
-        return hDate === targetDate && 
-               h.reportType !== 'class' && 
-               h.loja === profile?.loja && 
-               h.stats.totalSku > 0;
+        return hDate === targetDate &&
+          h.reportType !== 'class' &&
+          h.loja === profile?.loja &&
+          h.stats.totalSku > 0;
       });
 
       if (sameDayAudit) {
         const skuDoDia = sameDayAudit.stats.totalSku;
         startTransition(() => {
-          setData(result.summary); 
-          setClassDetails(result.details); 
+          setData(result.summary);
+          setClassDetails(result.details);
           setClassCategoryStats(result.categoryStats);
           setClassCollaboratorStats(result.collaboratorStats);
           setSelectedCategory(null);
@@ -274,10 +303,10 @@ const App: React.FC = () => {
       } else {
         setSkuModal({ isOpen: true, pendingFile: file, pendingResult: result, pendingDate: date });
       }
-    } catch (error) { 
-      console.error(error); 
-    } finally { 
-      setLoading(false); 
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -292,8 +321,8 @@ const App: React.FC = () => {
     if (skuModal.pendingResult && skuModal.pendingFile) {
       const result = skuModal.pendingResult;
       startTransition(() => {
-        setData(result.summary); 
-        setClassDetails(result.details); 
+        setData(result.summary);
+        setClassDetails(result.details);
         setClassCategoryStats(result.categoryStats);
         setClassCollaboratorStats(result.collaboratorStats);
         setSelectedCategory(null);
@@ -325,7 +354,7 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       await deleteHistoryItemById(deleteModal.id);
-      
+
       if (deleteModal.id === activeReportId) {
         startTransition(() => {
           setData([]);
@@ -335,7 +364,7 @@ const App: React.FC = () => {
           setActiveReportId('');
         });
       }
-      
+
       setHistory(prev => prev.filter(item => item.id !== deleteModal.id));
       setDeleteModal({ isOpen: false, id: '', name: '' });
       showToast("Auditoria removida!");
@@ -349,15 +378,44 @@ const App: React.FC = () => {
     try {
       const parsedData = await parseExcelFile(file);
       startTransition(() => {
-        setData(parsedData); 
+        setData(parsedData);
         setClassDetails([]); setClassCategoryStats(null); setClassCollaboratorStats(null);
       });
       await addToHistory(parsedData, 'audit', file, date);
       showToast("Arquivo importado!");
-    } catch (error) { 
+    } catch (error) {
       console.error(error);
       showToast("Erro ao ler o arquivo.");
     } finally { setLoading(false); }
+  };
+
+  const handleUpdateDate = async () => {
+    if (!datePickerModal.reportId || !newDateValue) return;
+
+    try {
+      setIsSyncing(true);
+      await updateHistoryItemDate(datePickerModal.reportId, newDateValue);
+
+      // Atualizar estado local do histórico
+      setHistory(prev => prev.map(item =>
+        item.id === datePickerModal.reportId
+          ? { ...item, customDate: newDateValue }
+          : item
+      ));
+
+      // Se o relatório editado for o ativo, atualizar customDate
+      if (activeReportId === datePickerModal.reportId) {
+        setCustomDate(newDateValue);
+      }
+
+      showToast("Data atualizada com sucesso!");
+      setDatePickerModal({ isOpen: false, reportId: '', currentDate: '' });
+    } catch (error) {
+      console.error(error);
+      showToast("Erro ao atualizar a data.");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleAnalysisFileSelect = async (file: File, date: string | null) => {
@@ -365,12 +423,79 @@ const App: React.FC = () => {
     try {
       const parsedData = await parseAnalysisFile(file);
       startTransition(() => {
-        setData(parsedData); 
+        setData(parsedData);
         setClassDetails([]); setClassCategoryStats(null); setClassCollaboratorStats(null);
       });
       await addToHistory(parsedData, 'analysis', file, date);
       showToast("Arquivo importado!");
     } catch (error) { console.error(error); } finally { setLoading(false); }
+  };
+
+  const handleShareReport = async () => {
+    if (!reportRef.current) return;
+    try {
+      setIsSyncing(true);
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 3, // Alta qualidade
+        backgroundColor: '#f1f5f9',
+        logging: false,
+        useCORS: true
+      });
+
+      // Converter para blob usando Promise para manter o contexto do gesto do usuário
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png', 0.95));
+
+      if (!blob) {
+        showToast("Erro ao gerar imagem.");
+        return;
+      }
+
+      const file = new File([blob], `Relatorio_Auditoria_Loja_${activeLoja || profile?.loja}.png`, { type: 'image/png' });
+
+      // Verificação de suporte ao compartilhamento
+      // IMPORTANTE: navigator.share geralmente requer HTTPS para funcionar em dispositivos remotos
+      if (navigator.share) {
+        try {
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'Relatório de Auditoria',
+              text: 'Confira o relatório de auditoria da loja.'
+            });
+          } else {
+            // Tenta compartilhar apenas o texto se arquivos não forem suportados
+            await navigator.share({
+              title: 'Relatório de Auditoria',
+              text: 'Confira o relatório de auditoria da loja.'
+            });
+            showToast("Navegador não suporta compartilhamento de arquivos.");
+          }
+        } catch (err: any) {
+          if (err.name !== 'AbortError') {
+            console.error('Erro ao compartilhar:', err);
+            showToast("Erro ao abrir compartilhamento.");
+          }
+        }
+      } else {
+        // Fallback para download se não houver navigator.share (ex: ambiente HTTP)
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `Relatorio_Auditoria_Loja_${activeLoja || profile?.loja}.png`;
+        link.click();
+
+        // Mensagem explicativa específica sobre HTTPS
+        if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost') {
+          showToast("Acesso via HTTP: Compartilhamento desativado pelo navegador. Imagem baixada.");
+        } else {
+          showToast("Compartilhamento não suportado. Imagem baixada.");
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      showToast("Erro ao preparar relatório.");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const triggerHeaderFileUpload = useCallback(() => {
@@ -438,7 +563,8 @@ const App: React.FC = () => {
       canvas.toBlob(async (blob) => {
         if (blob && navigator.clipboard) {
           await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-          showToast("Imagem copiada!");
+          setShowCopySuccess(true);
+          setTimeout(() => setShowCopySuccess(false), 3000);
         }
       });
     } catch (err) {
@@ -452,36 +578,36 @@ const App: React.FC = () => {
 
     const histItem = history.find(h => h.id === activeReportId);
     const totalNotRead = data.reduce((acc, curr) => acc + curr.notRead, 0);
-    
+
     const hasOutdatedData = data.some(row => row.outdated !== undefined);
-    const totalOutdated = hasOutdatedData 
+    const totalOutdated = hasOutdatedData
       ? data.reduce((acc, curr) => acc + (curr.outdated || 0), 0)
       : undefined;
 
     let totalSku = histItem ? histItem.stats.totalSku : data.reduce((acc, curr) => acc + curr.sku, 0);
-    
+
     if (reportType === 'class' && !histItem && !loading && !skuModal.isOpen && totalSku === totalNotRead) {
-        totalSku = 0; 
+      totalSku = 0;
     }
 
     const generalPartial = totalSku > 0 ? (totalNotRead / totalSku) * 100 : 0;
 
-    return { 
-        totalSku, 
-        totalNotRead, 
-        totalOutdated,
-        generalPartial, 
-        isSyncing: loading || reportLoading 
+    return {
+      totalSku,
+      totalNotRead,
+      totalOutdated,
+      generalPartial,
+      isSyncing: loading || reportLoading
     };
   }, [data, history, activeReportId, reportType, loading, reportLoading, skuModal.isOpen]);
 
   const filteredDetailedRows = useMemo(() => {
     if (!selectedCategory) return [];
     const catLow = selectedCategory.toLowerCase();
-    
+
     return classDetails.filter(row => {
       const sitLow = row.situacao.toLowerCase();
-      
+
       if (catLow === 'total_not_read') {
         const isOutOfStock = sitLow.includes('sem estoque');
         const isOutdated = sitLow.includes('desatualizado');
@@ -489,10 +615,10 @@ const App: React.FC = () => {
 
         const isNoRead = (sitLow.includes('não lido') || sitLow.includes('não lidos')) && sitLow.includes('estoque');
         const isNoPresence = sitLow.includes('sem presença') && sitLow.includes('estoque');
-        
+
         return (isNoRead || isNoPresence) && (row.estoque > 0 || sitLow.includes('com estoque'));
       }
-      
+
       if (catLow.includes('não lido')) {
         return (sitLow.includes('não lido') || sitLow.includes('não lidos')) && sitLow.includes('estoque');
       }
@@ -505,16 +631,20 @@ const App: React.FC = () => {
 
   // 4. EFFECT HOOKS
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession);
-      if (initialSession) fetchProfile(initialSession.user);
-      else setAuthLoading(false);
-    });
+    // Verificar sessão inicial do PocketBase
+    if (pb.authStore.isValid) {
+      setSession(pb.authStore.model);
+      fetchProfile(pb.authStore.model);
+    } else {
+      setAuthLoading(false);
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      if (newSession) fetchProfile(newSession.user);
-      else {
+    // Listener para mudanças na store do PocketBase
+    const removeListener = pb.authStore.onChange((token, model) => {
+      setSession(model);
+      if (model) {
+        fetchProfile(model);
+      } else {
         setProfile(null);
         setHistory([]);
         setData([]);
@@ -525,7 +655,7 @@ const App: React.FC = () => {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => removeListener();
   }, [fetchProfile]);
 
   useEffect(() => {
@@ -547,33 +677,33 @@ const App: React.FC = () => {
   }, [history, hasAutoSelected, data.length, classDetails.length, currentView, handleHistorySelect]);
 
   if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-100"><Loader2 className="animate-spin h-12 w-12 text-blue-600" /></div>;
-  if (!session) return <AuthScreen onLoginSuccess={() => {}} />;
+  if (!session) return <AuthScreen onLoginSuccess={() => { }} />;
 
   const reportInfo = getReportInfo();
   const hasData = (data && data.length > 0) || (classDetails && classDetails.length > 0);
   const canEdit = profile?.role === 'admin' || profile?.role === 'user';
 
   return (
-    <div 
+    <div
       className="min-h-screen bg-slate-100 text-slate-800 overscroll-none"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
       {/* Pull to Refresh Indicator */}
-      <div 
+      <div
         className="fixed top-0 left-0 right-0 z-[200] flex justify-center pointer-events-none transition-transform duration-200"
         style={{ transform: `translateY(${pullDistance - 50}px)` }}
       >
         <div className={`bg-white rounded-full shadow-xl border border-blue-100 p-2.5 flex items-center justify-center transition-all ${pullDistance > 120 ? 'scale-110 shadow-blue-200' : 'scale-90 opacity-60'}`}>
-          <RefreshCcw 
-            className={`w-6 h-6 text-blue-600 ${isRefreshing ? 'animate-spin' : ''}`} 
+          <RefreshCcw
+            className={`w-6 h-6 text-blue-600 ${isRefreshing ? 'animate-spin' : ''}`}
             style={{ transform: `rotate(${pullDistance * 3}deg)` }}
           />
         </div>
       </div>
 
-      <HistorySidebar 
+      <HistorySidebar
         history={history} onSelect={handleHistorySelect} onClearAll={() => setClearAllModal(true)}
         activeReportId={activeReportId}
         onDelete={(id) => {
@@ -590,18 +720,41 @@ const App: React.FC = () => {
 
       <div className={`transition-all duration-300 ease-in-out ${isSidebarOpen ? 'lg:ml-72' : 'lg:ml-0'}`}>
         <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-10 h-20 flex items-center px-4 md:px-8">
-           <div className="flex items-center gap-3 flex-1">
-             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-md hover:bg-slate-100 lg:hidden"><Menu className="w-6 h-6" /></button>
-             <div className={`p-2 rounded-lg transition-colors shadow-lg ${currentView === 'admin' ? 'bg-indigo-600' : currentView === 'weekly' ? 'bg-emerald-600' : 'bg-blue-600'}`}><LayoutDashboard className="w-6 h-6 text-white" /></div>
-             <h1 className="text-xl md:text-2xl font-black uppercase tracking-tight truncate">{currentView === 'admin' ? 'Administração' : currentView === 'weekly' ? 'Semanal' : 'Auditoria'}</h1>
-           </div>
-           {currentView === 'dashboard' && hasData && (
-             <div className="flex gap-2">
-               <button onClick={handleCopyReport} className="p-2 text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"><CopyIcon className="w-5 h-5" /></button>
-               <button onClick={handleExportImage} className="p-2 text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"><Download className="w-5 h-5" /></button>
-               {canEdit && <button onClick={triggerHeaderFileUpload} className="p-2 text-emerald-600 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"><RefreshCcw className="w-5 h-5" /></button>}
-             </div>
-           )}
+          <div className="flex items-center gap-3 flex-1">
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-md hover:bg-slate-100 lg:hidden"><Menu className="w-6 h-6" /></button>
+            <div className={`p-2 rounded-lg transition-colors shadow-lg ${currentView === 'admin' ? 'bg-indigo-600' : currentView === 'weekly' ? 'bg-emerald-600' : 'bg-blue-600'}`}><LayoutDashboard className="w-6 h-6 text-white" /></div>
+            <h1 className="text-xl md:text-2xl font-black uppercase tracking-tight truncate">{currentView === 'admin' ? 'Administração' : currentView === 'weekly' ? 'Semanal' : 'Auditoria'}</h1>
+          </div>
+          {currentView === 'dashboard' && hasData && (
+            <div className="flex gap-2 items-center">
+              {/* Desktop Only Buttons */}
+              <div className="relative">
+                <button
+                  onClick={handleCopyReport}
+                  className="hidden md:flex p-2 text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                  title="Copiar Relatório"
+                >
+                  <CopyIcon className="w-5 h-5" />
+                </button>
+                {showCopySuccess && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1 bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest rounded-lg shadow-lg shadow-emerald-100 animate-in fade-in slide-in-from-top-1 duration-300 z-50 whitespace-nowrap flex items-center gap-1">
+                    <Check className="w-2.5 h-2.5" /> Copiado!
+                  </div>
+                )}
+              </div>
+              <button onClick={handleExportImage} className="hidden md:flex p-2 text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"><Download className="w-5 h-5" /></button>
+              {canEdit && <button onClick={triggerHeaderFileUpload} className="hidden md:flex p-2 text-emerald-600 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"><RefreshCcw className="w-5 h-5" /></button>}
+
+              {/* Mobile Only Share Button */}
+              <button
+                onClick={handleShareReport}
+                disabled={isSyncing}
+                className="flex md:hidden p-3 text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors active:scale-90"
+              >
+                {isSyncing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Share2 className="w-6 h-6" />}
+              </button>
+            </div>
+          )}
         </header>
 
         <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-[calc(100vh-80px)]">
@@ -612,10 +765,13 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'admin' ? <AdminPanel onShowToast={showToast} /> : currentView === 'weekly' ? <WeeklySummary history={history} userProfile={profile} onSelectAudit={handleHistorySelect} /> : (
+          {currentView === 'admin' ? <AdminPanel onShowToast={showToast} onProfileUpdate={(newProfile) => {
+            setProfile(newProfile);
+            // O useEffect que observa 'profile' irá disparar o loadHistory automaticamente
+          }} /> : currentView === 'weekly' ? <WeeklySummary history={history} userProfile={profile} onSelectAudit={handleHistorySelect} /> : (
             !hasData ? (
-              canEdit ? <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-7xl mx-auto"><FileUpload onFileSelect={handleAuditFileSelect} isLoading={loading} title="Importar Auditoria" subtitle="Planilha Parcial" variant="blue"/><FileUpload onFileSelect={handleAnalysisFileSelect} isLoading={loading} title="Importar Análise" subtitle="Planilha Detalhada" variant="purple"/><FileUpload onFileSelect={handleClassFileSelect} isLoading={loading} title="Classe de Produto" subtitle="Itens por Classe" variant="orange"/></div> : 
-              <div className="mt-20 flex flex-col items-center text-center"><div className="bg-white p-12 rounded-[50px] shadow-2xl max-w-lg"><FileSearch className="w-12 h-12 text-slate-300 mx-auto mb-8"/><h3 className="text-2xl font-black mb-4 uppercase">Visualização de Dados</h3><p className="text-slate-500">Selecione um relatório no menu lateral para visualizar os dados salvos.</p></div></div>
+              canEdit ? <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-7xl mx-auto"><FileUpload onFileSelect={handleAuditFileSelect} isLoading={loading} title="Importar Auditoria" subtitle="Planilha Parcial" variant="blue" /><FileUpload onFileSelect={handleAnalysisFileSelect} isLoading={loading} title="Importar Análise" subtitle="Planilha Detalhada" variant="purple" /><FileUpload onFileSelect={handleClassFileSelect} isLoading={loading} title="Classe de Produto" subtitle="Itens por Classe" variant="orange" /></div> :
+                <div className="mt-20 flex flex-col items-center text-center"><div className="bg-white p-12 rounded-[50px] shadow-2xl max-w-lg"><FileSearch className="w-12 h-12 text-slate-300 mx-auto mb-8" /><h3 className="text-2xl font-black mb-4 uppercase">Visualização de Dados</h3><p className="text-slate-500">Selecione um relatório no menu lateral para visualizar os dados salvos.</p></div></div>
             ) : (
               <div ref={reportRef} key={activeReportId || 'new'} className="animate-in fade-in slide-in-from-top-4 duration-500">
                 <div className="flex flex-col gap-1 mb-6 text-center md:text-left">
@@ -624,51 +780,61 @@ const App: React.FC = () => {
                     <span className="block md:inline md:ml-2">{reportInfo.store}</span>
                   </h2>
                 </div>
-                
-                <SummaryStats 
-                  data={data} 
-                  isAnalysis={reportType === 'analysis'} 
-                  isClassReport={reportType === 'class'} 
+
+                <SummaryStats
+                  data={data}
+                  isAnalysis={reportType === 'analysis'}
+                  isClassReport={reportType === 'class'}
                   categoryStats={classCategoryStats}
                   collaboratorStats={classCollaboratorStats || {}}
                   selectedCategory={selectedCategory}
                   isCollaboratorView={isCollaboratorView}
                   onCategoryClick={(cat) => {
-                      setIsCollaboratorView(false);
-                      setSelectedCategory(cat === selectedCategory ? null : cat);
+                    setIsCollaboratorView(false);
+                    setSelectedCategory(cat === selectedCategory ? null : cat);
                   }}
                   onCollaboratorClick={() => {
-                      setSelectedCategory(null);
-                      setIsCollaboratorView(!isCollaboratorView);
+                    setSelectedCategory(null);
+                    setIsCollaboratorView(!isCollaboratorView);
                   }}
                   overrideStats={currentStats}
                 />
 
                 {isCollaboratorView && classCollaboratorStats ? (
-                   <div className="mb-10">
-                      <CollaboratorRanking 
-                        stats={classCollaboratorStats}
-                        onClose={() => setIsCollaboratorView(false)}
-                      />
-                   </div>
+                  <div className="mb-10">
+                    <CollaboratorRanking
+                      stats={classCollaboratorStats}
+                      onClose={() => setIsCollaboratorView(false)}
+                    />
+                  </div>
                 ) : selectedCategory ? (
-                   <div className="mb-10">
-                      <DetailedProductList 
-                        data={filteredDetailedRows} 
-                        category={selectedCategory} 
-                        onClose={() => setSelectedCategory(null)} 
-                        onShowToast={showToast}
-                      />
-                   </div>
+                  <div className="mb-10">
+                    <DetailedProductList
+                      data={filteredDetailedRows}
+                      category={selectedCategory}
+                      onClose={() => setSelectedCategory(null)}
+                      onShowToast={showToast}
+                    />
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
                     {data && data.length > 0 && (
                       <div className={`${reportType === 'class' ? 'xl:col-span-12' : 'xl:col-span-8'}`}>
-                        <AuditTable 
-                          data={data} 
-                          isAnalysis={reportType === 'analysis'} 
-                          isClassReport={reportType === 'class'} 
+                        <AuditTable
+                          data={data}
+                          isAnalysis={reportType === 'analysis'}
+                          isClassReport={reportType === 'class'}
                           dateLabel={getFormattedDateLabel()}
+                          onDateClick={canEdit ? () => {
+                            if (!activeReportId) {
+                              showToast("Selecione um relatório salvo para editar a data.");
+                              return;
+                            }
+                            const item = history.find(h => h.id === activeReportId);
+                            const initialDate = customDate || (item?.customDate) || new Date().toISOString().split('T')[0];
+                            setDatePickerModal({ isOpen: true, reportId: activeReportId, currentDate: initialDate });
+                            setNewDateValue(initialDate);
+                          } : undefined}
                         />
                       </div>
                     )}
@@ -690,7 +856,7 @@ const App: React.FC = () => {
               <h3 className="text-3xl font-black text-slate-800 uppercase tracking-tight mb-4 leading-tight">{dbErrorModal.message}</h3>
               <p className="text-slate-500 font-bold text-sm leading-relaxed px-10">Para utilizar relatórios de classe, você precisa adicionar novas colunas à sua tabela no Supabase. Copie o script abaixo e execute no seu <strong>SQL Editor</strong>.</p>
             </div>
-            
+
             <div className="p-8 space-y-6">
               <div className="bg-slate-900 rounded-3xl p-6 border-2 border-slate-800 relative group overflow-hidden">
                 <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
@@ -706,7 +872,7 @@ const App: React.FC = () => {
               </div>
 
               <div className="flex gap-4">
-                 <button onClick={() => setDbErrorModal({ ...dbErrorModal, isOpen: false })} className="w-full bg-slate-800 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl transition-all active:scale-95 uppercase text-[10px] tracking-widest">Entendi, Vou Executar</button>
+                <button onClick={() => setDbErrorModal({ ...dbErrorModal, isOpen: false })} className="w-full bg-slate-800 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl transition-all active:scale-95 uppercase text-[10px] tracking-widest">Entendi, Vou Executar</button>
               </div>
             </div>
           </div>
@@ -724,9 +890,9 @@ const App: React.FC = () => {
               <p className="text-slate-500 font-bold text-sm leading-relaxed mb-6">
                 Não encontramos uma auditoria para este dia. Informe o total de SKU da loja para calcularmos a parcial do relatório de classe.
               </p>
-              
+
               <form onSubmit={handleManualSkuSubmit} className="w-full space-y-4">
-                <input 
+                <input
                   type="number"
                   required
                   autoFocus
@@ -735,23 +901,23 @@ const App: React.FC = () => {
                   placeholder="Ex: 12500"
                   className="w-full px-6 py-4 bg-white border-2 border-blue-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 outline-none text-center text-2xl transition-all"
                 />
-                
+
                 <div className="flex gap-4 pt-2">
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={() => {
-                        setSkuModal({ isOpen: false });
-                        if (!history.some(h => h.id === activeReportId)) {
-                            setData([]);
-                            setClassDetails([]);
-                            setActiveReportId('');
-                        }
+                      setSkuModal({ isOpen: false });
+                      if (!history.some(h => h.id === activeReportId)) {
+                        setData([]);
+                        setClassDetails([]);
+                        setActiveReportId('');
+                      }
                     }}
                     className="flex-1 px-6 py-4 rounded-2xl font-black text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all uppercase text-[10px] tracking-widest"
                   >
                     Ignorar SKU
                   </button>
-                  <button 
+                  <button
                     type="submit"
                     className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-black py-4.5 rounded-2xl shadow-xl shadow-blue-100 flex items-center justify-center gap-2 active:scale-95 uppercase text-[10px] tracking-widest"
                   >
@@ -764,31 +930,91 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <ModalConfirm 
+      <ModalConfirm
         isOpen={deleteModal.isOpen} onClose={() => setDeleteModal({ ...deleteModal, isOpen: false })}
         onConfirm={confirmDeleteHistory} title="Excluir Auditoria?"
         message={`Deseja remover o registro "${deleteModal.name}"? Esta ação não pode ser desfeita.`}
         confirmLabel="Remover" isLoading={isSyncing} variant="danger"
       />
 
-      <ModalConfirm 
+      <ModalConfirm
         isOpen={clearAllModal} onClose={() => setClearAllModal(false)}
         onConfirm={confirmClearAll} title="Limpar Histórico?"
         message="Deseja remover TODOS os registros do seu histórico? Esta ação é irreversível."
         confirmLabel="Limpar Tudo" isLoading={isSyncing} variant="danger"
       />
 
-      <PasswordChangeModal 
-        isOpen={isPasswordModalOpen} 
-        onClose={() => setIsPasswordModalOpen(false)} 
-        username={profile?.username || ''} 
+      <PasswordChangeModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
+        username={profile?.username || ''}
       />
 
-      <Toast 
-        isVisible={toast.visible} 
-        message={toast.message} 
-        onClose={() => setToast({ ...toast, visible: false })} 
+      <Toast
+        isVisible={toast.visible}
+        message={toast.message}
+        onClose={() => setToast({ ...toast, visible: false })}
       />
+
+      {datePickerModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-[32px] shadow-2xl max-w-md w-full overflow-hidden border border-slate-100 animate-in zoom-in-95 slide-in-from-bottom-8 duration-300">
+            <div className="bg-blue-600 p-8 text-white relative">
+              <button
+                onClick={() => setDatePickerModal({ isOpen: false, reportId: '', currentDate: '' })}
+                className="absolute top-6 right-6 p-2 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <div className="flex items-center gap-4 mb-2">
+                <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-md">
+                  <Calendar className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black uppercase tracking-tight">Alterar Data</h3>
+                  <p className="text-blue-100 text-xs font-bold uppercase tracking-widest opacity-80">Ajuste o dia do relatório</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-8">
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-1">Nova Data da Auditoria</label>
+                  <div className="relative group">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <input
+                      type="date"
+                      value={newDateValue}
+                      onChange={(e) => setNewDateValue(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:outline-none focus:border-blue-600 focus:bg-white transition-all font-black text-slate-900 uppercase tracking-tight"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-2">
+                  <button
+                    onClick={handleUpdateDate}
+                    disabled={isSyncing}
+                    className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-700 active:scale-[0.98] transition-all shadow-lg shadow-blue-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Salvar Alteração
+                  </button>
+                  <button
+                    onClick={() => setDatePickerModal({ isOpen: false, reportId: '', currentDate: '' })}
+                    className="w-full py-5 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-200 active:scale-[0.98] transition-all"
+                  >
+                    Manter Atual
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

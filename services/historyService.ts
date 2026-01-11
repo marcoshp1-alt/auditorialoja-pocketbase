@@ -1,108 +1,115 @@
-
-import { supabase } from './supabaseClient';
+import { pb } from './pocketbase';
 import { HistoryItem, UserProfile } from '../types';
 
 // Busca apenas metadados leves para a barra lateral e listagens
 export const fetchHistory = async (profile: UserProfile): Promise<HistoryItem[]> => {
-  let query = supabase
-    .from('audit_history')
-    .select('id, created_at, file_name, report_type, stats, custom_date, loja')
-    .order('created_at', { ascending: false });
+  try {
+    let filter = '';
+    if (profile.role !== 'admin') {
+      filter = `loja = "${profile.loja}"`;
+    } else if (profile.visibleLojas && profile.visibleLojas.length > 0) {
+      filter = profile.visibleLojas.map(l => `loja = "${l}"`).join(' || ');
+    }
 
-  if (profile.role !== 'admin') {
-    query = query.eq('loja', profile.loja);
-  }
+    console.log('🔍 Buscando histórico com filtro:', filter || 'NENHUM (ADMIN - VER TUDO)');
 
-  const { data, error } = await query;
+    const records = await pb.collection('audit_history').getList(1, 100, {
+      sort: '-created',
+      filter: filter
+    });
 
-  if (error) {
-    console.error('Error fetching history:', JSON.stringify(error));
+    return records.items.map((row: any) => ({
+      id: row.id,
+      timestamp: new Date(row.created).getTime(),
+      fileName: row.fileName,
+      reportType: row.reportType,
+      data: [], // Vazio por padrão no fetch leve
+      classDetails: [],
+      categoryStats: null,
+      collaboratorStats: null,
+      stats: row.stats || { totalSku: 0, totalNotRead: 0, generalPartial: 0 },
+      customDate: row.customDate,
+      loja: row.loja || '204'
+    }));
+  } catch (error: any) {
+    if (error.isAbort || error.status === 0) return [];
+    console.error('Error fetching history:', error);
     throw error;
   }
-
-  return data.map((row: any) => ({
-    id: row.id,
-    timestamp: new Date(row.created_at).getTime(),
-    fileName: row.file_name,
-    reportType: row.report_type,
-    data: [], // Vazio por padrão no fetch leve
-    classDetails: [],
-    categoryStats: null,
-    collaboratorStats: null,
-    stats: row.stats || { totalSku: 0, totalNotRead: 0, generalPartial: 0 },
-    customDate: row.custom_date,
-    loja: row.loja || '204'
-  }));
 };
 
 // Busca os dados pesados (JSONB) de um único relatório
 export const fetchHistoryItemDetails = async (id: string): Promise<any> => {
-  const { data, error } = await supabase
-    .from('audit_history')
-    .select('data, class_details, category_stats, collaborator_stats')
-    .eq('id', id)
-    .single();
+  try {
+    const data = await pb.collection('audit_history').getOne(id);
 
-  if (error) {
+    return {
+      data: data.data || [],
+      classDetails: data.classDetails || [],
+      categoryStats: data.categoryStats || null,
+      collaboratorStats: data.collaboratorStats || null
+    };
+  } catch (error: any) {
+    if (error.isAbort || error.status === 0) return null;
     console.error('Error fetching item details:', error);
     throw error;
   }
-
-  return {
-    data: data.data || [],
-    classDetails: data.class_details || [],
-    categoryStats: data.category_stats || null,
-    collaboratorStats: data.collaborator_stats || null
-  };
 };
 
 export const addHistoryItem = async (item: HistoryItem): Promise<void> => {
   const payload = {
-    file_name: item.fileName,
-    report_type: item.reportType,
-    custom_date: item.customDate || null,
+    fileName: item.fileName,
+    reportType: item.reportType,
+    customDate: item.customDate || null,
     stats: item.stats,
     data: item.data || [],
-    class_details: item.classDetails || [],
-    category_stats: item.categoryStats || null,
-    collaborator_stats: item.collaboratorStats || null,
+    classDetails: item.classDetails || [],
+    categoryStats: item.categoryStats || null,
+    collaboratorStats: item.collaboratorStats || null,
     loja: item.loja || '204'
   };
 
-  const { error } = await supabase.from('audit_history').insert([payload]);
-
-  if (error) {
-    if (error.code === '42703' || error.message?.includes('column')) {
-      const sqlRepair = `
--- Execute este script no SQL Editor do seu Supabase para habilitar novos recursos:
-ALTER TABLE audit_history ADD COLUMN IF NOT EXISTS class_details JSONB DEFAULT '[]';
-ALTER TABLE audit_history ADD COLUMN IF NOT EXISTS category_stats JSONB DEFAULT '{}';
-ALTER TABLE audit_history ADD COLUMN IF NOT EXISTS collaborator_stats JSONB DEFAULT '{}';
-      `.trim();
-      
-      const enhancedError = new Error("Sua tabela 'audit_history' precisa ser atualizada.");
-      (enhancedError as any).sql = sqlRepair;
-      (enhancedError as any).code = 'MISSING_COLUMNS';
-      throw enhancedError;
+  try {
+    await pb.collection('audit_history').create(payload);
+  } catch (error: any) {
+    console.error('Error adding history item:', error);
+    if (error.data) {
+      console.error('Validation errors:', JSON.stringify(error.data, null, 2));
     }
     throw error;
   }
 };
 
-export const deleteHistoryItemById = async (id: string): Promise<void> => {
-  const { error } = await supabase
-    .from('audit_history')
-    .delete()
-    .eq('id', id);
+export const updateHistoryItemDate = async (id: string, newDate: string): Promise<void> => {
+  try {
+    await pb.collection('audit_history').update(id, {
+      customDate: newDate
+    });
+  } catch (error) {
+    console.error('Error updating history item date:', error);
+    throw error;
+  }
+};
 
-  if (error) throw error;
+export const deleteHistoryItemById = async (id: string): Promise<void> => {
+  try {
+    await pb.collection('audit_history').delete(id);
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    throw error;
+  }
 };
 
 export const deleteAllHistory = async (): Promise<void> => {
-    const { error } = await supabase
-      .from('audit_history')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000');
-  
-    if (error) throw error;
+  try {
+    // PocketBase não tem "delete all" nativo simples via SDK sem loop ou batch
+    // Como é uma operação de risco, vamos apenas avisar ou implementar via loop controlado
+    const records = await pb.collection('audit_history').getFullList();
+    for (const record of records) {
+      await pb.collection('audit_history').delete(record.id);
+    }
+  } catch (error) {
+    console.error('Error deleting all history:', error);
+    throw error;
+  }
 };

@@ -62,7 +62,7 @@ export interface HistoryItem {
     generalPartial: number;
   };
   customDate: string | null;
-  loja: string; 
+  loja: string;
 }
 
 export interface UserProfile {
@@ -70,4 +70,5 @@ export interface UserProfile {
   username: string;
   role: 'admin' | 'user' | 'viewer';
   loja: string;
+  visibleLojas?: string[];
 }
