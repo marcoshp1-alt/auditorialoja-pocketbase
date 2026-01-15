@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { pb } from '../services/pocketbase';
-import { X, Lock, Check, Loader2, KeyRound, AlertCircle } from 'lucide-react';
+import { X, Lock, Check, Loader2, KeyRound, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 interface PasswordChangeModalProps {
   isOpen: boolean;
@@ -10,8 +10,12 @@ interface PasswordChangeModalProps {
 }
 
 const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClose, username }) => {
+  const [oldPassword, setOldPassword] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -22,8 +26,8 @@ const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClo
     e.preventDefault();
     setError(null);
 
-    if (password.length < 6) {
-      setError('A nova senha deve ter pelo menos 6 caracteres.');
+    if (password.length < 8) {
+      setError('A nova senha deve ter pelo menos 8 caracteres.');
       return;
     }
 
@@ -38,6 +42,7 @@ const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClo
       if (!userId) throw new Error('Usuário não autenticado.');
 
       await pb.collection('users').update(userId, {
+        oldPassword: oldPassword,
         password: password,
         passwordConfirm: confirmPassword
       });
@@ -46,6 +51,7 @@ const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClo
       setTimeout(() => {
         onClose();
         setSuccess(false);
+        setOldPassword('');
         setPassword('');
         setConfirmPassword('');
       }, 2000);
@@ -93,20 +99,50 @@ const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClo
 
             <div className="space-y-5 text-left">
               <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Senha Atual</label>
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors w-5 h-5" />
+                  <input
+                    type={showOldPassword ? "text" : "password"}
+                    required
+                    autoFocus
+                    disabled={loading}
+                    value={oldPassword}
+                    onChange={e => setOldPassword(e.target.value)}
+                    placeholder="Sua senha atual"
+                    className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPassword(!showOldPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors p-1"
+                  >
+                    {showOldPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Nova Senha</label>
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors w-5 h-5" />
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     required
-                    minLength={6}
-                    autoFocus
+                    minLength={8}
                     disabled={loading}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    placeholder="No mínimo 6 caracteres"
-                    className="w-full pl-12 pr-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none"
+                    placeholder="No mínimo 8 caracteres"
+                    className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors p-1"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
                 </div>
               </div>
               <div>
@@ -114,15 +150,22 @@ const PasswordChangeModal: React.FC<PasswordChangeModalProps> = ({ isOpen, onClo
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors w-5 h-5" />
                   <input
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     required
-                    minLength={6}
+                    minLength={8}
                     disabled={loading}
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
                     placeholder="Repita a nova senha"
-                    className="w-full pl-12 pr-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none"
+                    className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 focus:bg-white transition-all outline-none"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors p-1"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
                 </div>
               </div>
             </div>

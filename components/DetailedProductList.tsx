@@ -14,15 +14,27 @@ interface DetailedProductListProps {
 const DetailedProductList: React.FC<DetailedProductListProps> = ({ data, category, onClose, onShowToast }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
+  const normalizeItem = (item: any) => ({
+    c: item.c !== undefined ? item.c : item.codigo,
+    p: item.p !== undefined ? item.p : item.produto,
+    e: item.e !== undefined ? item.e : item.estoque,
+    r: item.r !== undefined ? item.r : item.classeRaiz,
+    l: item.l !== undefined ? item.l : item.local,
+    s: item.s !== undefined ? item.s : item.situacao
+  });
+
   const filteredData = useMemo(() => {
     if (!searchTerm) return data;
     const low = searchTerm.toLowerCase();
-    return data.filter(item =>
-      item.produto.toLowerCase().includes(low) ||
-      String(item.codigo).includes(low) ||
-      item.classeRaiz.toLowerCase().includes(low) ||
-      item.local.toLowerCase().includes(low)
-    );
+    return data.filter(item => {
+      const norm = normalizeItem(item);
+      return (
+        norm.p.toLowerCase().includes(low) ||
+        String(norm.c).includes(low) ||
+        norm.r.toLowerCase().includes(low) ||
+        norm.l.toLowerCase().includes(low)
+      );
+    });
   }, [data, searchTerm]);
 
   const displayTitle = useMemo(() => {
@@ -37,13 +49,16 @@ const DetailedProductList: React.FC<DetailedProductListProps> = ({ data, categor
     if (filteredData.length === 0) return;
 
     // Preparar dados para exportação
-    const exportData = filteredData.map(item => ({
-      'Código': item.codigo,
-      'Produto': item.produto,
-      'Local': item.local,
-      'Estoque Atual': item.estoque,
-      'Classe Raiz': item.classeRaiz
-    }));
+    const exportData = filteredData.map(item => {
+      const norm = normalizeItem(item);
+      return {
+        'Código': norm.c,
+        'Produto': norm.p,
+        'Local': norm.l,
+        'Estoque Atual': norm.e,
+        'Classe Raiz': norm.r
+      };
+    });
 
     // Criar planilha
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -151,47 +166,50 @@ const DetailedProductList: React.FC<DetailedProductListProps> = ({ data, categor
                 </td>
               </tr>
             ) : (
-              filteredData.map((item, idx) => (
-                <tr key={idx} className="hover:bg-blue-50/40 transition-colors group">
-                  {/* Código */}
-                  <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
-                    <span className="font-mono text-sm font-black text-slate-400 group-hover:text-blue-600 transition-colors">
-                      {item.codigo}
-                    </span>
-                  </td>
-
-                  {/* Produto */}
-                  <td className="px-8 py-2">
-                    <p className="text-[13px] font-black text-slate-800 uppercase leading-tight group-hover:text-blue-900 transition-colors">
-                      {item.produto}
-                    </p>
-                  </td>
-
-                  {/* Local */}
-                  <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-slate-300 group-hover:bg-blue-400" />
-                      <span className="text-[11px] font-bold text-slate-500 uppercase">
-                        {item.local}
+              filteredData.map((item, idx) => {
+                const norm = normalizeItem(item);
+                return (
+                  <tr key={idx} className="hover:bg-blue-50/40 transition-colors group">
+                    {/* Código */}
+                    <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
+                      <span className="font-mono text-sm font-black text-slate-400 group-hover:text-blue-600 transition-colors">
+                        {norm.c}
                       </span>
-                    </div>
-                  </td>
+                    </td>
 
-                  {/* Estoque Atual */}
-                  <td className="px-8 py-2 whitespace-nowrap text-center">
-                    <span className="inline-flex items-center justify-center px-4 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-black text-sm min-w-[60px] border border-slate-200 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-700 transition-all">
-                      {item.estoque}
-                    </span>
-                  </td>
+                    {/* Produto */}
+                    <td className="px-8 py-2">
+                      <p className="text-[13px] font-black text-slate-800 uppercase leading-tight group-hover:text-blue-900 transition-colors">
+                        {norm.p}
+                      </p>
+                    </td>
 
-                  {/* Classe de Produto Raiz */}
-                  <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">
-                      {item.classeRaiz}
-                    </span>
-                  </td>
-                </tr>
-              ))
+                    {/* Local */}
+                    <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-slate-300 group-hover:bg-blue-400" />
+                        <span className="text-[11px] font-bold text-slate-500 uppercase">
+                          {norm.l}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Estoque Atual */}
+                    <td className="px-8 py-2 whitespace-nowrap text-center">
+                      <span className="inline-flex items-center justify-center px-4 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-black text-sm min-w-[60px] border border-slate-200 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-700 transition-all">
+                        {norm.e}
+                      </span>
+                    </td>
+
+                    {/* Classe de Produto Raiz */}
+                    <td className="px-8 py-2 whitespace-nowrap bg-slate-50/20 group-hover:bg-transparent">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors">
+                        {norm.r}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

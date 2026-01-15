@@ -9,14 +9,12 @@ export interface AuditRow {
 }
 
 export interface ClassDetailRow {
-  codigo: string | number;
-  produto: string;
-  estoque: number;
-  classeRaiz: string;
-  colaborador: string;
-  local: string;
-  presencaConfirmada: string;
-  situacao: string;
+  c: string | number; // codigo
+  p: string;         // produto
+  e: number;         // estoque
+  r: string;         // classeRaiz
+  l: string;         // local
+  s: string;         // situacao
 }
 
 export interface RawExcelRow {

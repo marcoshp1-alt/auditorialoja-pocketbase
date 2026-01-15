@@ -257,14 +257,12 @@ export const parseProductClassFile = (file: File): Promise<ProductClassResult> =
 
           if (isRelevant) {
             details.push({
-              codigo: normalizedRow["Código"] || "",
-              produto: String(normalizedRow["Produto"] || ""),
-              estoque: stock,
-              classeRaiz: sanitizeName(rootClass ? String(rootClass) : "OUTROS"),
-              colaborador: collaboratorName || "S/N",
-              local: String(normalizedRow["Local"] || "S/N"),
-              presencaConfirmada: String(normalizedRow["Presença confirmada"] || "---"),
-              situacao: status
+              c: normalizedRow["Código"] || "",
+              p: String(normalizedRow["Produto"] || ""),
+              e: stock,
+              r: sanitizeName(rootClass ? String(rootClass) : "OUTROS"),
+              l: String(normalizedRow["Local"] || "S/N"),
+              s: status
             });
           }
         });

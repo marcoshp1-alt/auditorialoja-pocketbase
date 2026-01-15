@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { UserPlus, Trash2, Edit2, Shield, Store, User, X, Check, Loader2, AlertCircle, RefreshCw, Eye, Terminal, Lock, Settings } from 'lucide-react';
+import { Store, User, Shield, Edit2, Trash2, UserPlus, X, Check, Loader2, AlertCircle, FileText, LayoutDashboard, History, Settings, ExternalLink, LogOut, Terminal, Eye, EyeOff, RefreshCw, Lock, UserPlus2 } from 'lucide-react';
 import ModalConfirm from './ModalConfirm';
 import { pb } from '../services/pocketbase';
 
@@ -133,6 +133,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
     }
   };
   const [formLoading, setFormLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [formError, setFormError] = useState<{ message: string, type: 'error' | 'warning' | 'info', sql?: string } | null>(null);
 
   useEffect(() => {
@@ -185,11 +186,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
       });
     }
     setFormError(null);
+    setShowPassword(false);
     setIsModalOpen(true);
   };
 
-  const extractErrorMessage = (err: any): { message: string, sql?: string } => {
-    return { message: err?.message || 'Erro inesperado no PocketBase' };
+  const extractErrorMessage = (err: any): { message: string, type: 'error' | 'warning' | 'info', sql?: string } => {
+    return {
+      message: err?.message || 'Erro inesperado no PocketBase',
+      type: 'error'
+    };
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -201,6 +206,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
       const cleanUsername = formData.username.trim().toLowerCase();
       const cleanLoja = formData.loja.trim() || '204';
       const internalEmail = cleanUsername.includes('@') ? cleanUsername : `${cleanUsername}@sistema.local`;
+
+      // Validação de senha
+      if (formData.password.trim() !== '' && formData.password.length < 8) {
+        setFormError({ message: 'A senha deve ter pelo menos 8 caracteres.', type: 'error' });
+        setFormLoading(false);
+        return;
+      }
 
       if (editingUser) {
         // 1. Buscar o registro do perfil correspondente
@@ -214,12 +226,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
 
         // 3. Atualizar senha no Auth do PocketBase se fornecida
         if (formData.password.trim() !== '') {
-          // No PocketBase, a alteração de senha de outro usuário requer privilégios de admin
-          // Por enquanto, informamos que a senha não pode ser alterada via painel
-          console.warn('Alteração de senha via painel não implementada. Use o painel do PocketBase.');
-          onShowToast('Senha não alterada. Use o painel do PocketBase para resetar senhas.');
+          try {
+            await pb.collection('users').update(editingUser.id, {
+              password: formData.password,
+              passwordConfirm: formData.password
+            });
+            onShowToast("Usuário e senha atualizados!");
+          } catch (passErr: any) {
+            console.error('Erro ao atualizar senha:', passErr);
+            onShowToast('Perfil atualizado, mas erro ao mudar senha (Verifique as API Rules).');
+          }
+        } else {
+          onShowToast("Usuário atualizado!");
         }
-        onShowToast("Usuário atualizado!");
       } else {
         // Criar no PocketBase
         console.log('🚀 Iniciando criação de usuário:', cleanUsername);
@@ -474,7 +493,26 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
                 </div>
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">{editingUser ? 'Nova Senha (opcional)' : 'Senha'}</label>
-                  <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" /><input type="password" required={!editingUser} minLength={6} disabled={formLoading} value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full pl-12 pr-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 transition-all outline-none" /></div>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required={!editingUser}
+                      minLength={8}
+                      disabled={formLoading}
+                      value={formData.password}
+                      onChange={e => setFormData({ ...formData, password: e.target.value })}
+                      placeholder={editingUser ? "Deixe vazio para manter" : "No mínimo 8 dígitos"}
+                      className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 focus:border-blue-500 transition-all outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors p-1"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>

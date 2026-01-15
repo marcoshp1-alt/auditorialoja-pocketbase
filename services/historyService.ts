@@ -56,20 +56,49 @@ export const fetchHistoryItemDetails = async (id: string): Promise<any> => {
   }
 };
 
+const REPORT_LIMITS: Record<string, number> = {
+  'audit': 5,
+  'analysis': 1,
+  'class': 1
+};
+
 export const addHistoryItem = async (item: HistoryItem): Promise<void> => {
-  const payload = {
-    fileName: item.fileName,
-    reportType: item.reportType,
-    customDate: item.customDate || null,
-    stats: item.stats,
-    data: item.data || [],
-    classDetails: item.classDetails || [],
-    categoryStats: item.categoryStats || null,
-    collaboratorStats: item.collaboratorStats || null,
-    loja: item.loja || '204'
-  };
+  const loja = item.loja || '204';
+  const type = item.reportType;
+  const limit = REPORT_LIMITS[type] || 5;
 
   try {
+    // 1. Buscar registros existentes do mesmo tipo e loja, ordenados por data (mais antigos primeiro)
+    const existing = await pb.collection('audit_history').getFullList({
+      filter: `loja = "${loja}" && reportType = "${type}"`,
+      sort: 'created',
+      fields: 'id' // Só precisamos do ID para deletar
+    });
+
+    // 2. Se atingiu ou passou o limite, apagar o(s) mais antigo(s)
+    // Usamos >= limit porque vamos adicionar um novo em seguida
+    if (existing.length >= limit) {
+      const toDeleteCount = (existing.length - limit) + 1;
+      const toDelete = existing.slice(0, toDeleteCount);
+
+      for (const record of toDelete) {
+        console.log(`🗑️ Removendo histórico antigo (${type}) da loja ${loja}: ${record.id}`);
+        await pb.collection('audit_history').delete(record.id);
+      }
+    }
+
+    const payload = {
+      fileName: item.fileName,
+      reportType: item.reportType,
+      customDate: item.customDate || null,
+      stats: item.stats,
+      data: item.data || [],
+      classDetails: item.classDetails || [],
+      categoryStats: item.categoryStats || null,
+      collaboratorStats: item.collaboratorStats || null,
+      loja: loja
+    };
+
     await pb.collection('audit_history').create(payload);
   } catch (error: any) {
     console.error('Error adding history item:', error);

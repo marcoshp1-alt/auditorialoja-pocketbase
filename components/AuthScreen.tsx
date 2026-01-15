@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { pb } from '../services/pocketbase';
-import { Lock, User, Loader2, LogIn, AlertCircle } from 'lucide-react';
+import { Lock, User, Loader2, LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 interface AuthScreenProps {
   onLoginSuccess: () => void;
@@ -10,6 +10,7 @@ interface AuthScreenProps {
 const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [usernameInput, setUsernameInput] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,14 +111,21 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             <div className="relative group">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors w-5 h-5" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white outline-none transition-all font-bold text-slate-700"
+                className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white outline-none transition-all font-bold text-slate-700"
                 placeholder="••••••••"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors p-1"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
             </div>
           </div>
 

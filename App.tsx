@@ -181,7 +181,7 @@ const App: React.FC = () => {
   const addToHistory = async (newData: AuditRow[], type: ReportType, file: File, date: string | null, details?: ClassDetailRow[], categoryStats?: any, collaboratorStats?: any, overrideSku?: number) => {
     if (!session || !profile) return;
 
-    let totalSku = overrideSku || newData.reduce((acc, curr) => acc + curr.sku, 0);
+    let totalSku = overrideSku !== undefined ? overrideSku : newData.reduce((acc, curr) => acc + curr.sku, 0);
     const totalNotRead = newData.reduce((acc, curr) => acc + curr.notRead, 0);
 
     const hasOutdatedData = newData.some(row => row.outdated !== undefined);
@@ -281,16 +281,12 @@ const App: React.FC = () => {
       const result = await parseProductClassFile(file);
       const targetDate = date || new Date().toLocaleDateString('en-CA');
 
-      const sameDayAudit = history.find(h => {
-        const hDate = h.customDate || new Date(h.timestamp).toLocaleDateString('en-CA');
-        return hDate === targetDate &&
-          h.reportType !== 'class' &&
-          h.loja === profile?.loja &&
-          h.stats.totalSku > 0;
-      });
+      const lastAudit = [...history]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .find(h => h.reportType === 'audit' && h.loja === profile?.loja && h.stats.totalSku > 0);
 
-      if (sameDayAudit) {
-        const skuDoDia = sameDayAudit.stats.totalSku;
+      if (lastAudit) {
+        const lastSku = lastAudit.stats.totalSku;
         startTransition(() => {
           setData(result.summary);
           setClassDetails(result.details);
@@ -299,7 +295,7 @@ const App: React.FC = () => {
           setSelectedCategory(null);
           setIsCollaboratorView(false);
         });
-        await addToHistory(result.summary, 'class', file, date, result.details, result.categoryStats, result.collaboratorStats, skuDoDia);
+        await addToHistory(result.summary, 'class', file, date, result.details, result.categoryStats, result.collaboratorStats, lastSku);
       } else {
         setSkuModal({ isOpen: true, pendingFile: file, pendingResult: result, pendingDate: date });
       }
@@ -606,7 +602,9 @@ const App: React.FC = () => {
     const catLow = selectedCategory.toLowerCase();
 
     return classDetails.filter(row => {
-      const sitLow = row.situacao.toLowerCase();
+      const situacao = (row as any).s || (row as any).situacao || "";
+      const sitLow = situacao.toLowerCase();
+      const estoque = (row as any).e !== undefined ? (row as any).e : (row as any).estoque || 0;
 
       if (catLow === 'total_not_read') {
         const isOutOfStock = sitLow.includes('sem estoque');
@@ -616,7 +614,7 @@ const App: React.FC = () => {
         const isNoRead = (sitLow.includes('não lido') || sitLow.includes('não lidos')) && sitLow.includes('estoque');
         const isNoPresence = sitLow.includes('sem presença') && sitLow.includes('estoque');
 
-        return (isNoRead || isNoPresence) && (row.estoque > 0 || sitLow.includes('com estoque'));
+        return (isNoRead || isNoPresence) && (estoque > 0 || sitLow.includes('com estoque'));
       }
 
       if (catLow.includes('não lido')) {
