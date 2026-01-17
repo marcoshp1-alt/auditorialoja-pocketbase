@@ -8,34 +8,12 @@ import { pb } from '../services/pocketbase';
 interface AdminPanelProps {
   onShowToast: (message: string) => void;
   onProfileUpdate?: (profile: UserProfile) => void;
+  profile: UserProfile | null;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate, profile }) => {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-
-  useEffect(() => {
-    // Carregar perfil do usuário logado para verificar role adicionalmente
-    const fetchCurrentProfile = async () => {
-      if (pb.authStore.model) {
-        try {
-          const profileData = await pb.collection('profiles').getFirstListItem(`user="${pb.authStore.model.id}"`);
-          setProfile({
-            id: pb.authStore.model.id,
-            username: profileData.username,
-            role: profileData.role,
-            loja: profileData.loja
-          });
-        } catch (e: any) {
-          if (!e.isAbort && e.status !== 0) {
-            console.error("Erro ao validar perfil admin:", e);
-          }
-        }
-      }
-    };
-    fetchCurrentProfile();
-  }, []);
 
   // Bloqueio de segurança: Se não for admin, não renderiza nada
   if (profile && profile.role !== 'admin' && pb.authStore.model?.username !== 'admin') {
@@ -69,19 +47,41 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
 
   useEffect(() => {
     const loadAdminLojas = async () => {
-      // 1. Carregar lojas já selecionadas do perfil
-      if (profile?.visibleLojas) {
+      // 1. Carregar lojas já selecionadas do perfil (prioridade absoluta para o estado global)
+      if (profile?.visibleLojas && profile.visibleLojas.length > 0) {
         setAdminLojas(profile.visibleLojas);
-      } else if (profile?.loja) {
-        // Fallback para o campo loja se não houver visibleLojas (pode vir como CSV)
-        const lojas = profile.loja.split(',').map(l => l.trim()).filter(l => l !== '');
-        setAdminLojas(lojas);
+      } else if (profile?.id) {
+        // Fallback: Se o perfil não tem visibleLojas carregado ainda, busca do banco agora
+        try {
+          const profileRecord = await pb.collection('profiles').getFirstListItem(`user="${profile.id}"`, { requestKey: null });
+          console.log('📊 [AdminPanel] Campos do Profile no banco:', Object.keys(profileRecord));
+          const rawVisible = profileRecord.visibleLojas || profileRecord.visible_lojas || "";
+
+          if (rawVisible) {
+            const list = rawVisible.split(',').map((l: string) => l.trim()).filter((l: string) => l !== "");
+            console.log('🎯 [AdminPanel] Lojas recuperadas do banco:', list);
+            setAdminLojas(list);
+          }
+        } catch (e) {
+          console.warn("Nenhuma preferência anterior encontrada no banco.");
+        }
       }
 
-      // 2. Buscar todas as lojas que existem no histórico para dar como opção
+      // 2. Buscar todas as lojas que existem no histórico E nos perfis para dar como opção
       try {
-        const historyRecords = await pb.collection('audit_history').getFullList({ fields: 'loja' });
-        const uniqueLojas = Array.from(new Set(historyRecords.map(r => r.loja))).sort();
+        const historyRecords = await pb.collection('audit_history').getFullList({ fields: 'loja', requestKey: null });
+        const profileRecords = await pb.collection('profiles').getFullList({ fields: 'loja', requestKey: null });
+
+        // Combina lojas do histórico e dos usuários cadastrados
+        const allSources = [
+          ...historyRecords.map(r => r.loja),
+          ...profileRecords.flatMap(r => String(r.loja).split(',').map(l => l.trim()))
+        ];
+
+        const allLojasFound = allSources
+          .filter(l => l && l !== '' && l.length < 10 && !l.includes(','));
+
+        const uniqueLojas = Array.from(new Set(allLojasFound)).sort();
         setAllAvailableLojas(uniqueLojas);
       } catch (e) {
         console.error("Erro ao carregar lojas disponíveis:", e);
@@ -110,17 +110,22 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onShowToast, onProfileUpdate })
     setIsSavingLojas(true);
     try {
       const lojasCsv = adminLojas.join(',');
-      const profileRecord = await pb.collection('profiles').getFirstListItem(`user="${profile.id}"`);
-      await pb.collection('profiles').update(profileRecord.id, {
-        loja: lojasCsv
-      });
+      console.log('💾 Salvando visibleLojas no banco para o usuário:', profile.id, 'Conteúdo:', lojasCsv);
 
-      // Notificar o componente App sobre a mudança para atualizar o dashboard na hora
+      const profileRecord = await pb.collection('profiles').getFirstListItem(`user="${profile.id}"`, { requestKey: null });
+
+      await pb.collection('profiles').update(profileRecord.id, {
+        visibleLojas: lojasCsv
+      }, { requestKey: null });
+
+      console.log('✅ Salvo com sucesso no PocketBase!');
+
+      // Notificar o componente App sobre a mudança
       if (onProfileUpdate) {
         onProfileUpdate({
           ...profile,
-          loja: lojasCsv,
           visibleLojas: adminLojas
+          // NOTA: O campo 'loja' (loja base) permanece intacto aqui
         });
       }
 

@@ -84,7 +84,7 @@ const App: React.FC = () => {
 
       let profileData: any = null;
       try {
-        profileData = await pb.collection('profiles').getFirstListItem(`user="${userId}"`);
+        profileData = await pb.collection('profiles').getFirstListItem(`user="${userId}"`, { requestKey: null });
       } catch (e: any) {
         // Silenciar erro de autocancelamento ou apenas informar que o perfil será criado
         if (!e.isAbort && e.status !== 0) {
@@ -97,7 +97,8 @@ const App: React.FC = () => {
         id: userId,
         username: profileData?.username || user.username || user.email || 'usuário',
         role: profileData?.role || user.role || 'user',
-        loja: profileData?.loja || user.loja || '204'
+        loja: profileData?.loja || user.loja || '204',
+        visibleLojas: [] // Inicializa vazio para ser populado abaixo
       };
 
       // ⚠️ WORKAROUND: Forçar admin estritamente para o usuário principal "admin"
@@ -106,18 +107,40 @@ const App: React.FC = () => {
         console.log('🔧 FORÇADO: Usuário admin detectado, role definido como admin');
       }
 
-      // Se for admin, o campo 'loja' pode conter múltiplas lojas separadas por vírgula
-      if (mergedProfile.role === 'admin' && mergedProfile.loja) {
-        mergedProfile.visibleLojas = mergedProfile.loja.split(',').map(l => l.trim()).filter(l => l !== '');
+      // Se for admin, o campo 'visibleLojas' contém a lista CSV de lojas que ele pode ver
+      // O campo 'loja' deve conter apenas a sua loja base (ID único)
+      if (mergedProfile.role === 'admin') {
+        // 1. Limpa o campo loja caso contenha CSV (erro antigo)
+        if (mergedProfile.loja && mergedProfile.loja.includes(',')) {
+          mergedProfile.loja = mergedProfile.loja.split(',')[0].trim();
+        }
+
+        // 2. Carrega lojas visíveis do novo campo, com fallback para loja se necessário
+        const rawVisible = profileData?.visibleLojas || profileData?.visible_lojas || "";
+        console.log('📊 Campos do Profile:', Object.keys(profileData || {}));
+        console.log('📦 Conteúdo visibleLojas:', rawVisible);
+
+        const visibleList = rawVisible.split(',')
+          .map((l: string) => l.trim())
+          .filter((l: string) => l !== '' && l.length < 10);
+
+        mergedProfile.visibleLojas = visibleList.length > 0 ? visibleList : [mergedProfile.loja];
+        console.log('🎯 visibleLojas processadas:', mergedProfile.visibleLojas);
       }
 
       console.log('👤 Perfil final aplicado:', mergedProfile);
 
       setProfile(mergedProfile);
-      setActiveLoja(prev => prev || mergedProfile.loja);
+      setActiveLoja(prev => {
+        // Se a loja anterior estiver corrompida por CSV, limpa
+        if (prev && prev.includes(',')) return mergedProfile.loja;
+        return prev || mergedProfile.loja;
+      });
+
+      console.log('✅ Perfil carregado com sucesso:', mergedProfile.username, 'Lojas:', mergedProfile.visibleLojas);
     } catch (err: any) {
       if (!err.isAbort && err.status !== 0) {
-        console.error("Erro no carregamento do perfil:", err);
+        console.error("Erro fatal no carregamento do perfil:", err);
       }
     } finally {
       setAuthLoading(false);
@@ -763,7 +786,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'admin' ? <AdminPanel onShowToast={showToast} onProfileUpdate={(newProfile) => {
+          {currentView === 'admin' ? <AdminPanel profile={profile} onShowToast={showToast} onProfileUpdate={(newProfile) => {
             setProfile(newProfile);
             // O useEffect que observa 'profile' irá disparar o loadHistory automaticamente
           }} /> : currentView === 'weekly' ? <WeeklySummary history={history} userProfile={profile} onSelectAudit={handleHistorySelect} /> : (

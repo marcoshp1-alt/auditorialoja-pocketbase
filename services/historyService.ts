@@ -15,7 +15,8 @@ export const fetchHistory = async (profile: UserProfile): Promise<HistoryItem[]>
 
     const records = await pb.collection('audit_history').getList(1, 100, {
       sort: '-created',
-      filter: filter
+      filter: filter,
+      requestKey: null // Desativa cancelamento automático para garantir persistência
     });
 
     return records.items.map((row: any) => ({
@@ -41,7 +42,7 @@ export const fetchHistory = async (profile: UserProfile): Promise<HistoryItem[]>
 // Busca os dados pesados (JSONB) de um único relatório
 export const fetchHistoryItemDetails = async (id: string): Promise<any> => {
   try {
-    const data = await pb.collection('audit_history').getOne(id);
+    const data = await pb.collection('audit_history').getOne(id, { requestKey: null });
 
     return {
       data: data.data || [],
@@ -68,21 +69,29 @@ export const addHistoryItem = async (item: HistoryItem): Promise<void> => {
   const limit = REPORT_LIMITS[type] || 5;
 
   try {
-    // 1. Buscar registros existentes do mesmo tipo e loja, ordenados por data (mais antigos primeiro)
+    // 1. Buscar registros existentes do mesmo tipo, loja e DATA, ordenados por data (mais antigos primeiro)
+    // Agora o limite é por DATA (customDate), permitindo histórico de dias diferentes
+    let filter = `loja = "${loja}" && reportType = "${type}"`;
+    if (item.customDate) {
+      filter += ` && customDate = "${item.customDate}"`;
+    } else {
+      filter += ` && customDate = null`;
+    }
+
     const existing = await pb.collection('audit_history').getFullList({
-      filter: `loja = "${loja}" && reportType = "${type}"`,
+      filter: filter,
       sort: 'created',
-      fields: 'id' // Só precisamos do ID para deletar
+      fields: 'id', // Só precisamos do ID para deletar
+      requestKey: null
     });
 
-    // 2. Se atingiu ou passou o limite, apagar o(s) mais antigo(s)
-    // Usamos >= limit porque vamos adicionar um novo em seguida
+    // 2. Se atingiu ou passou o limite PARA ESSE DIA, apagar o(s) mais antigo(s)
     if (existing.length >= limit) {
       const toDeleteCount = (existing.length - limit) + 1;
       const toDelete = existing.slice(0, toDeleteCount);
 
       for (const record of toDelete) {
-        console.log(`🗑️ Removendo histórico antigo (${type}) da loja ${loja}: ${record.id}`);
+        console.log(`🗑️ Removendo histórico antigo (${type}) da loja ${loja} no dia ${item.customDate || 'sem data'}: ${record.id}`);
         await pb.collection('audit_history').delete(record.id);
       }
     }
@@ -122,7 +131,7 @@ export const updateHistoryItemDate = async (id: string, newDate: string): Promis
 
 export const deleteHistoryItemById = async (id: string): Promise<void> => {
   try {
-    await pb.collection('audit_history').delete(id);
+    await pb.collection('audit_history').delete(id, { requestKey: null });
   } catch (error) {
     console.error('Error deleting item:', error);
     throw error;
